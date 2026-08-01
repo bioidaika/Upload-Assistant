@@ -37,6 +37,7 @@ async def check_mod_q_and_draft(
         "LST": {"mod_q": True, "draft": True},
         "LATTEAM": {"mod_q": True, "draft": False},
         "LUMINARR": {"mod_q": True, "draft": False},
+        "VMF": {"mod_q": True, "draft": False},
     }
 
     modq, draft = None, None

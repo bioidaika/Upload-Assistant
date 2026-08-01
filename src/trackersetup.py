@@ -93,6 +93,7 @@ from src.trackers.UNIT3D.torrentdesi import DesiTorrents
 from src.trackers.UNIT3D.torrenteros import Torrenteros
 from src.trackers.UNIT3D.ulcx import ULCX
 from src.trackers.UNIT3D.utopia import Utopia
+from src.trackers.UNIT3D.vmf import VietMediaF
 from src.trackers.UNIT3D.yuscene import YUSCENE
 from src.trackers.UNIT3D.znth import Zenith
 from src.trackers.USENET.curupira import Curupira
@@ -1410,6 +1411,7 @@ tracker_class_map: dict[str, Any] = {
     "TVCHAOSUK": TVChaosUK,
     "ULCX": ULCX,
     "UTOPIA": Utopia,
+    "VMF": VietMediaF,
     "YUSCENE": YUSCENE,
     "ZENITH": Zenith,
 }

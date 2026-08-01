@@ -348,6 +348,7 @@ const trackerNameMap = {
   ULCX: "ULCX",
   SUIO: "Suio",
   UTOPIA: "UTOPIA",
+  VMF: "VietMediaF",
   YUSCENE: "YUSCENE",
   ZENITH: "Zenith",
 };

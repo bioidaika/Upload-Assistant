@@ -5,6 +5,7 @@ import platform
 import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import urljoin, urlsplit
 
 import aiofiles
 import httpx
@@ -75,8 +76,9 @@ class UNIT3D:
                 "name": "",
                 "perPage": "100",
             }
-            if meta.tmdb is not None:
-                params_dict["tmdbId"] = str(meta.tmdb)
+            tmdb_id = (await self.get_tmdb(meta))["tmdb"]
+            if meta.tmdb is not None or tmdb_id not in ("", "0"):
+                params_dict["tmdbId"] = tmdb_id
 
             if self.tracker not in ["OLDTOONSWORLD"]:
                 resolutions = await self.get_resolution_id(meta)
@@ -507,7 +509,7 @@ class UNIT3D:
                         meta.tracker_status[self.tracker]["status_message"] = await self.process_response_data(response_data)
                         torrent_id = await self.get_torrent_id(response_data)
                         meta.tracker_status[self.tracker]["torrent_id"] = torrent_id
-                        download_url = response_data.get("data")
+                        download_url = self.resolve_upload_download_url(response_data)
                         post_succeeded = True
                         break  # POST definitively succeeded
 
@@ -562,7 +564,15 @@ class UNIT3D:
 
             if post_succeeded:
                 # Download is outside the retry loop — a POST timeout/error cannot cause re-submission
-                await self.common.download_tracker_torrent(meta, self.tracker, headers=headers, downurl=download_url)
+                if download_url:
+                    try:
+                        await self.common.download_tracker_torrent(meta, self.tracker, headers=headers, downurl=download_url)
+                    except Exception as e:
+                        # The remote upload is already complete. Never retry its POST because
+                        # fetching the registered torrent failed locally.
+                        logger.warning(f"{self.tracker}: [yellow]Could not download the uploaded torrent: {e!s}[/yellow]")
+                else:
+                    logger.warning(f"{self.tracker}: [yellow]Upload succeeded, but the response did not contain a safe torrent download URL.[/yellow]")
                 return True
         else:
             logger.info(f"{self.tracker}: Request Data:")
@@ -578,16 +588,72 @@ class UNIT3D:
 
         return False
 
-    async def get_torrent_id(self, response_data: dict[str, Any]) -> str:
-        """Matches /12345.abcde and returns 12345"""
-        torrent_id = ""
+    @staticmethod
+    def _normalize_upload_response_data(response_data: dict[str, Any]) -> str:
+        raw_data = response_data.get("data")
+        if isinstance(raw_data, bool):
+            return ""
+        if isinstance(raw_data, int):
+            return str(raw_data)
+        if isinstance(raw_data, str):
+            return raw_data.strip()
+        return ""
+
+    @staticmethod
+    def _url_origin(url: str) -> tuple[str, str, int] | None:
         try:
-            match = re.search(r"/(\d+)\.", response_data["data"])
+            parsed = urlsplit(url)
+            scheme = parsed.scheme.lower()
+            hostname = parsed.hostname
+            if scheme not in {"http", "https"} or not hostname or parsed.username is not None or parsed.password is not None:
+                return None
+            port = parsed.port
+        except ValueError:
+            return None
+
+        if port is None:
+            port = 443 if scheme == "https" else 80
+        return scheme, hostname.casefold(), port
+
+    def resolve_upload_download_url(self, response_data: dict[str, Any]) -> str | None:
+        """Resolve UNIT3D upload response data to a same-origin download URL."""
+        data = self._normalize_upload_response_data(response_data)
+        base_url = self.base_url.strip().rstrip("/")
+        base_origin = self._url_origin(base_url)
+        if not data or base_origin is None:
+            return None
+
+        if re.fullmatch(r"[0-9]+", data):
+            data = f"torrent/download/{data}"
+
+        # Backslashes are interpreted inconsistently by URL parsers and HTTP
+        # clients, so reject them instead of risking an origin-check bypass.
+        if "\\" in data:
+            return None
+
+        try:
+            resolved_url = urljoin(f"{base_url}/", data)
+        except ValueError:
+            return None
+        if self._url_origin(resolved_url) != base_origin:
+            return None
+        return resolved_url
+
+    async def get_torrent_id(self, response_data: dict[str, Any]) -> str:
+        """Return a torrent ID from numeric data or a safe UNIT3D download URL."""
+        data = self._normalize_upload_response_data(response_data)
+        if re.fullmatch(r"[0-9]+", data):
+            return data
+
+        download_url = self.resolve_upload_download_url(response_data)
+        if download_url:
+            filename = urlsplit(download_url).path.rstrip("/").rsplit("/", 1)[-1]
+            match = re.match(r"([0-9]+)(?:\.|$)", filename)
             if match:
-                torrent_id = match.group(1)
-        except IndexError, KeyError:
-            logger.info(f"{self.tracker}: Could not parse torrent_id from response data.")
-        return torrent_id
+                return match.group(1)
+
+        logger.info(f"{self.tracker}: Could not parse torrent_id from response data.")
+        return ""
 
     async def process_response_data(self, response_data: dict[str, Any]) -> str:
         """Returns the success message from the response data as a string."""
