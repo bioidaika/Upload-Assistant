@@ -131,6 +131,9 @@ def test_vmf_name_does_not_treat_title_word_as_existing_tag(title_word: str):
         ("Example Movie 2025 1080p WEB-DL-GRP ViE", {}, ["Vietnamese"], "Example Movie 2025 ViE 1080p WEB-DL-GRP"),
         ("Example.Movie.2025.1080p.WEB-DL-GRP.ViE.DUB", {}, ["Vietnamese"], "Example.Movie.2025.ViE.DUB.1080p.WEB-DL-GRP"),
         ("Example Movie 2025 ViE ViE DUB 1080p WEB-DL-GRP ViE", {}, ["Vietnamese"], "Example Movie 2025 ViE DUB 1080p WEB-DL-GRP"),
+        ("Example.Movie.2025.1080p.WEB-DL.ViE-GRP", {}, ["Vietnamese"], "Example.Movie.2025.ViE.1080p.WEB-DL-GRP"),
+        ("Example.Movie.2025.ViE-1080p.WEB-DL-GRP", {}, ["Vietnamese"], "Example.Movie.2025.ViE.1080p.WEB-DL-GRP"),
+        ("Example Movie 2025 1080p WEB-DL ViE-GRP", {}, ["Vietnamese"], "Example Movie 2025 ViE 1080p WEB-DL-GRP"),
     ],
 )
 def test_vmf_name_reconciles_existing_tags(name: str, audio_titles: dict[str, str], languages: list[str], expected: str):
@@ -150,6 +153,18 @@ def test_vmf_name_is_idempotent():
     second = asyncio.run(vmf.get_name(meta))["name"]
 
     assert first == "Example.Movie.2026.ViE.DUB.1080p.WEB-DL-GRP"
+    assert second == first
+
+
+def test_vmf_name_normalizes_whitespace_around_existing_tag_idempotently():
+    meta = Meta(name="Example\tViE\t1080p WEB-DL-GRP", resolution="1080p", audio_languages=["Vietnamese"])
+    vmf = tracker()
+
+    first = asyncio.run(vmf.get_name(meta))["name"]
+    meta.name = first
+    second = asyncio.run(vmf.get_name(meta))["name"]
+
+    assert first == "Example ViE 1080p WEB-DL-GRP"
     assert second == first
 
 

@@ -99,10 +99,39 @@ class VietMediaF(UNIT3D):
 
     @classmethod
     def _remove_existing_audio_tags(cls, name: str) -> str:
-        cleaned = cls._vmf_tag_pattern.sub("", name)
-        cleaned = re.sub(r" {2,}", " ", cleaned)
-        cleaned = re.sub(r"\.{2,}", ".", cleaned)
-        return cleaned.strip(" .")
+        cleaned = name
+        matches = list(cls._vmf_tag_pattern.finditer(name))
+
+        # Work right-to-left so each original match offset remains valid while
+        # adjacent separators are collapsed into one canonical gap.
+        for match in reversed(matches):
+            left = cleaned[: match.start()]
+            right = cleaned[match.end() :]
+            left_separator_match = re.search(r"[\s.-]+$", left)
+            right_separator_match = re.match(r"[\s.-]+", right)
+            left_separator = left_separator_match.group() if left_separator_match else ""
+            right_separator = right_separator_match.group() if right_separator_match else ""
+            left_content = left[: len(left) - len(left_separator)] if left_separator else left
+            right_content = right[len(right_separator) :]
+
+            replacement = ""
+            if left_content and right_content:
+                technical_suffix = cls._resolution_pattern.match(right_content) or cls._source_pattern.match(right_content)
+                if "-" in right_separator and technical_suffix is None:
+                    # A non-technical suffix after a hyphen is the release group.
+                    replacement = "-"
+                elif "." in left_separator or "." in right_separator:
+                    replacement = "."
+                elif any(character.isspace() for character in left_separator + right_separator):
+                    replacement = " "
+                else:
+                    replacement = "." if "." in name and " " not in name else " "
+
+            start = match.start() - len(left_separator)
+            end = match.end() + len(right_separator)
+            cleaned = f"{cleaned[:start]}{replacement}{cleaned[end:]}"
+
+        return cleaned.strip().strip(".-").strip()
 
     @staticmethod
     def _last_match_start(pattern: re.Pattern[str], name: str) -> int | None:
