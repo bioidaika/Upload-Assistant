@@ -9,7 +9,7 @@ import aiofiles
 import httpx
 from rich.markup import escape
 
-from cogs.redaction import Redaction
+from src.cogs.redaction import Redaction
 from src.console import console, logger
 from src.get_desc import DescriptionBuilder, html_to_bbcode
 from src.languages import languages_manager
@@ -279,7 +279,7 @@ class SpeedApp:
             "description": str(meta.genres),
             "name": await self.get_name(meta),
             "nfo": await self.get_nfo(meta),
-            "poster": meta.poster or meta.cover,
+            "poster": meta.artwork_url,
             "technicalDetails": await self.edit_desc(meta),
             "screenshots": await self.get_screenshots(meta),
             "type": await self.get_cat_id(meta),

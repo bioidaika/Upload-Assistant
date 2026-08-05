@@ -15,7 +15,7 @@ from rich.markup import escape
 from src.console import logger
 from src.get_desc import DescriptionBuilder
 from src.meta import Meta
-from src.temp_paths import posters_dir
+from src.temp_paths import artwork_dir
 from src.trackers.UNIT3D import UNIT3D
 from src.uploadscreens import UploadScreensManager
 
@@ -190,23 +190,20 @@ class Cinematik(UNIT3D):
         country_name = self.country_code_to_name(str(meta.region))
 
         # Rehost poster if tmdb_poster is available
-        poster_url = f"https://image.tmdb.org/t/p/original{meta.tmdb_poster}"
+        poster_url = f"https://image.tmdb.org/t/p/original{meta.tmdb_poster_path}"
 
         # Define the paths for both jpg and png poster images
-        poster_dir = posters_dir(meta.base_dir, meta.uuid)
-        poster_jpg_path = str(poster_dir / "poster.jpg")
-        poster_png_path = str(poster_dir / "poster.png")
+        poster_dir = artwork_dir(meta.base_dir, meta.uuid)
+        poster_paths = [poster_dir / filename for filename in ("POSTER.png", "poster.png", "POSTER.jpg", "poster.jpg")]
 
         # Check if either poster.jpg or poster.png already exists
-        if Path(poster_jpg_path).exists():
-            poster_path = poster_jpg_path
-            logger.info(f"{self.tracker}: [green]Cover already exists as poster.jpg, skipping download.[/green]")
-        elif Path(poster_png_path).exists():
-            poster_path = poster_png_path
-            logger.info(f"{self.tracker}: [green]Cover already exists as poster.png, skipping download.[/green]")
+        existing_poster = next((path for path in poster_paths if path.is_file()), None)
+        if existing_poster is not None:
+            poster_path = str(existing_poster)
+            logger.info(f"{self.tracker}: [green]Cover already exists as {existing_poster.name}, skipping download.[/green]")
         else:
             # No poster file exists, download the poster image
-            poster_path = poster_jpg_path  # Default to saving as poster.jpg
+            poster_path = str(poster_dir / "poster.jpg")  # Default to saving as poster.jpg
             try:
                 parsed_url = urlparse(poster_url)
                 if parsed_url.scheme not in ("http", "https"):
@@ -388,17 +385,20 @@ class Cinematik(UNIT3D):
         description = "".join(desc_text)
 
         # Ask user if they want to edit or keep the description
-        logger.info(f"{self.tracker}: Current description: {description}", extra={"markup": False})
-        logger.info(f"{self.tracker}: [cyan]Do you want to edit or keep the description?[/cyan]")
-        edit_choice = cli_ui.ask_string("Enter 'e' to edit, or press Enter to keep it as is: ")
+        if not meta.unattended or (meta.unattended and meta.unattended_confirm):
+            logger.info(f"{self.tracker}: Current description: {description}", extra={"markup": False})
+            logger.info(f"{self.tracker}: [cyan]Do you want to edit or keep the description?[/cyan]")
+            edit_choice = cli_ui.ask_string("Enter 'e' to edit, or press Enter to keep it as is: ")
 
-        if (edit_choice or "").lower() == "e":
-            edited_description = cast(str | None, click.edit(description))  # pyrefly: ignore [bad-argument-type]
-            if edited_description:
-                description = edited_description.strip()
-            logger.info(f"{self.tracker}: Final description after editing: {description}", extra={"markup": False})
+            if (edit_choice or "").lower() == "e":
+                edited_description = cast(str | None, click.edit(description))  # pyrefly: ignore [bad-argument-type]
+                if edited_description:
+                    description = edited_description.strip()
+                logger.info(f"{self.tracker}: Final description after editing: {description}", extra={"markup": False})
+            else:
+                logger.info(f"{self.tracker}: [green]Keeping the original description.[/green]")
         else:
-            logger.info(f"{self.tracker}: [green]Keeping the original description.[/green]")
+            logger.info(f"{self.tracker}: [green]Unattended mode: Keeping the original description.[/green]")
 
         # Write the final description to the file
         async with aiofiles.open(f"{meta.base_dir}{'/' + 'tmp' + '/'}{meta.uuid}/[{self.tracker}]DESCRIPTION.txt", "w", encoding="utf-8") as desc_file:

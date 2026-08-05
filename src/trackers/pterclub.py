@@ -11,7 +11,7 @@ import httpx
 from bs4 import BeautifulSoup
 from unidecode import unidecode
 
-from cogs.redaction import Redaction
+from src.cogs.redaction import Redaction
 from src.console import logger
 from src.cookie_auth import CookieValidator
 from src.exceptions import *  # noqa E403
@@ -187,8 +187,9 @@ class PTerClub:
         return medium_id
 
     async def edit_desc(self, meta: Meta) -> None:
-        async with aiofiles.open(f"{meta.base_dir}{'/' + 'tmp' + '/'}{meta.uuid}/DESCRIPTION.txt", encoding="utf-8") as base_file:
-            base = await base_file.read()
+        from src.description_review import get_base_description
+
+        base = get_base_description(meta)
 
         from src.bbcode import BBCODE
         from src.trackers.common import Common

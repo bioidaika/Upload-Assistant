@@ -17,18 +17,19 @@ import httpx
 from pymediainfo import MediaInfo
 from rich.markup import escape
 
-from cogs.redaction import PathAwareEncoder, Redaction
 from src.bbcode import BBCODE
-from src.console import console, logger
+from src.cogs.redaction import PathAwareEncoder, Redaction
+from src.console import logger, prompt_in_thread
 from src.cookie_auth import CookieValidator
 from src.exceptions import *  # noqa F403
 from src.exceptions import UploadError
 from src.meta import Meta
-from src.rehostimages import RehostImagesManager
+from src.rehostimages import ImageHostPolicy, RehostImagesManager
 from src.screenshot_manifest import files as manifest_files
 from src.takescreens import TakeScreensManager
-from src.temp_paths import posters_dir, screenshots_dir
+from src.temp_paths import artwork_dir, screenshots_dir
 from src.torrentcreate import TorrentCreator
+from src.tracker_images import get_tracker_image_collection
 from src.trackers.common import Common
 from src.uploadscreens import UploadScreensManager
 
@@ -80,6 +81,7 @@ class PassThePopcorn:
         "WORLD",
     )
     approved_image_hosts = ("pixhost",)
+    image_host_policy = ImageHostPolicy({"pixhost.to": "pixhost"}, approved_image_hosts)
     sub_lang_map: ClassVar[dict[tuple[str, ...], int]] = {
         ("Arabic", "ara", "ar"): 22,
         ("Brazilian Portuguese", "Brazilian", "Portuguese-BR", "pt-br", "pt-BR"): 49,
@@ -130,9 +132,9 @@ class PassThePopcorn:
         self.rehost_images_manager = RehostImagesManager(config)
         self.takescreens_manager = TakeScreensManager(config)
         self.uploadscreens_manager = UploadScreensManager(config)
-        self.api_user = config["TRACKERS"]["PassThePopcorn"].get("ApiUser", "").strip()
-        self.api_key = config["TRACKERS"]["PassThePopcorn"].get("api_key", "").strip()
-        announce_url = config["TRACKERS"]["PassThePopcorn"].get("announce_url", "").strip()
+        self.api_user = config["TRACKERS"][self.tracker].get("ApiUser", "").strip()
+        self.api_key = config["TRACKERS"][self.tracker].get("api_key", "").strip()
+        announce_url = config["TRACKERS"][self.tracker].get("announce_url", "").strip()
         if announce_url and announce_url.startswith("http://"):
             logger.info(f"{self.tracker}: [red]announce URL is using plaintext HTTP.\n")
             logger.info(
@@ -142,9 +144,9 @@ class PassThePopcorn:
             self.announce_url = announce_url.replace("http://", "https://").replace(":2710", "")
         else:
             self.announce_url = announce_url
-        self.username = config["TRACKERS"]["PassThePopcorn"].get("username", "").strip()
-        self.password = config["TRACKERS"]["PassThePopcorn"].get("password", "").strip()
-        self.web_source = self._is_true(config["TRACKERS"]["PassThePopcorn"].get("add_web_source_to_desc", True))
+        self.username = config["TRACKERS"][self.tracker].get("username", "").strip()
+        self.password = config["TRACKERS"][self.tracker].get("password", "").strip()
+        self.web_source = self._is_true(config["TRACKERS"][self.tracker].get("add_web_source_to_desc", True))
         self.user_agent = f"Upload-Assistant/2.3 ({platform.system()} {platform.release()})"
 
         self.cookie_validator = CookieValidator(config)
@@ -285,7 +287,7 @@ class PassThePopcorn:
             if not meta.skipit and not meta.unattended:
                 # Allow user to edit or discard the description
                 logger.info(f"{self.tracker}: [cyan]Do you want to edit, discard or keep the description?[/cyan]")
-                edit_choice = cli_ui.ask_string("Enter 'e' to edit, 'd' to discard, or press Enter to keep it as is: ")
+                edit_choice = await prompt_in_thread(cli_ui.ask_string, "Enter 'e' to edit, 'd' to discard, or press Enter to keep it as is: ")
 
                 if (edit_choice or "").lower() == "e":
                     edited_description = cast(str | None, click.edit(cast(Any, desc)))
@@ -359,7 +361,7 @@ class PassThePopcorn:
                 choices.append("Skip - Don't use any of these matches")
 
                 try:
-                    selected = cli_ui.ask_choice("Select the correct movie:", choices=choices)
+                    selected = await prompt_in_thread(cli_ui.ask_choice, "Select the correct movie:", choices=choices)
                     if selected == "Skip - Don't use any of these matches":
                         logger.info(f"{self.tracker}: [yellow]User chose to skip all matches[/yellow]")
                         return None
@@ -548,7 +550,7 @@ class PassThePopcorn:
         if self._poster_already_on_selected_host(image_url, selected_host):
             return image_url
 
-        tmp_dir = posters_dir(meta.base_dir, meta.uuid)
+        tmp_dir = artwork_dir(meta.base_dir, meta.uuid)
         try:
             tmp_dir.mkdir(parents=True, exist_ok=True)
             async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
@@ -822,23 +824,10 @@ class PassThePopcorn:
         desc = desc.replace("[ol]", "").replace("[/ol]", "")
         return re.sub(r"\[img=[^\]]+\]", "[img]", desc)
 
-    async def check_image_hosts(self, meta: Meta) -> None:
-        url_host_mapping = {
-            "pixhost.to": "pixhost",
-        }
-
-        await self.rehost_images_manager.check_hosts(
-            meta,
-            self.tracker,
-            url_host_mapping=url_host_mapping,
-            img_host_index=1,
-            approved_image_hosts=self.approved_image_hosts,
-        )
-        return
-
     async def edit_desc(self, meta: Meta) -> None:
-        async with aiofiles.open(f"{meta.base_dir}{'/' + 'tmp' + '/'}{meta.uuid}/DESCRIPTION.txt", encoding="utf-8") as base_file:
-            base = await base_file.read()
+        from src.description_review import get_base_description
+
+        base = get_base_description(meta)
         if meta.scene_nfo_file:
             # Remove NFO from description
             meta_description = re.sub(
@@ -853,7 +842,7 @@ class PassThePopcorn:
             multi_screens = 2
             logger.info(f"{self.tracker}: [yellow]requires at least 2 screenshots for multi disc/file content, overriding config")
 
-        image_list_value: Any = (meta.PTP_images_key if "PTP_images_key" in meta else meta.image_list) if not meta.skip_imghost_upload else []
+        image_list_value: Any = get_tracker_image_collection(meta, self.tracker, "screenshots") if not meta.skip_imghost_upload else []
         image_list = cast(list[dict[str, Any]], image_list_value) if isinstance(image_list_value, list) else []
         images: list[dict[str, Any]] = image_list
 
@@ -1259,7 +1248,9 @@ class PassThePopcorn:
                         new_screens = [f.name for f in manifest_files(meta.base_dir, meta.uuid, f"FILE_{i}")]
                         if not new_screens:
                             try:
-                                await self.takescreens_manager.screenshots(file, f"FILE_{i}", meta.uuid, meta.base_dir, meta, multi_screens, True, "")
+                                await self.takescreens_manager.screenshots(
+                                    file, f"FILE_{i}", meta.uuid, meta.base_dir, meta, multi_screens, True, "", capture_group=f"FILE_{i}"
+                                )
                             except Exception as e:
                                 logger.info(f"{self.tracker}: Error during generic screenshot capture: {e}", extra={"markup": False})
                         new_screens = [f.name for f in manifest_files(meta.base_dir, meta.uuid, f"FILE_{i}")]
@@ -1391,8 +1382,10 @@ class PassThePopcorn:
             try:
                 resp = loginresponse.json()
                 if resp["Result"] == "TfaRequired":
+                    if meta.unattended and not meta.unattended_confirm:
+                        raise LoginError(f"{self.tracker}: 2FA is required in unattended mode.")  # noqa: F405
                     data["TfaType"] = "normal"
-                    data["TfaCode"] = cli_ui.ask_string("2FA Required: Please enter PassThePopcorn 2FA code")
+                    data["TfaCode"] = await prompt_in_thread(cli_ui.ask_string, "2FA Required: Please enter PassThePopcorn 2FA code")
                     loginresponse = await client.post(f"{self.base_url}/ajax.php?action=login", data=data, headers=headers)
                     await asyncio.sleep(2)
                     resp = loginresponse.json()
@@ -1491,11 +1484,11 @@ class PassThePopcorn:
 
         elif no_audio_found and (not any(x in [3, 50] for x in ptp_subtitles)):
             cli_ui.info("No English subs and no audio tracks found should this be trumpable?")
-            if cli_ui.ask_yes_no("Mark trumpable?", default=True):
+            if (not meta.unattended or meta.unattended_confirm) and await prompt_in_thread(cli_ui.ask_yes_no, "Mark trumpable?", default=True):
                 ptp_trumpable, ptp_subtitles = self.get_trumpable(ptp_subtitles)
         elif not english_audio and (not any(x in [3, 50] for x in ptp_subtitles)):
             cli_ui.info("No English subs and English audio is not the first audio track, should this be trumpable?")
-            if cli_ui.ask_yes_no("Mark trumpable?", default=True):
+            if (not meta.unattended or meta.unattended_confirm) and await prompt_in_thread(cli_ui.ask_yes_no, "Mark trumpable?", default=True):
                 ptp_trumpable, ptp_subtitles = self.get_trumpable(ptp_subtitles)
 
         logger.debug(f"{self.tracker}: ptp_trumpable: {ptp_trumpable}")
@@ -1545,18 +1538,23 @@ class PassThePopcorn:
                 youtube = (
                     ""
                     if meta.unattended
-                    else cli_ui.ask_string("Unable to find youtube trailer, please link one e.g.(https://www.youtube.com/watch?v=dQw4w9WgXcQ)", default="")
+                    else await prompt_in_thread(
+                        cli_ui.ask_string, "Unable to find youtube trailer, please link one e.g.(https://www.youtube.com/watch?v=dQw4w9WgXcQ)", default=""
+                    )
                 )
                 meta.youtube = youtube
             cover = meta.imdb_info.get("cover")
             if cover is None:
-                cover = meta.poster
+                cover = meta.artwork_url
             if isinstance(cover, str) and cover.strip():
                 cover = await self.rehost_poster_to_selected_host(meta, cover)
             elif isinstance(cover, str):
                 cover = None
             while cover is None:
-                cover_input = cli_ui.ask_string("No Cover was found. Please input a link to a cover: \n", default="") or "".strip()
+                if meta.unattended and not meta.unattended_confirm:
+                    meta.skipping = self.tracker
+                    raise UploadError(f"{self.tracker}: Cover is required in unattended mode.")
+                cover_input = await prompt_in_thread(cli_ui.ask_string, "No Cover was found. Please input a link to a cover: \n", default="") or "".strip()
                 if not cover_input:
                     continue
                 if not cover_input.lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
@@ -1575,10 +1573,14 @@ class PassThePopcorn:
                 new_data["year"] = meta.manual_year
             if not new_data["tags"]:
                 if (meta.mode if meta.mode is not None else "non_cli") == "cli":
+                    if meta.unattended and not meta.unattended_confirm:
+                        logger.info(f"{self.tracker}: [yellow]Unattended mode: Unable to match any tags. Skipping {self.tracker} upload.[/yellow]")
+                        meta.skipping = f"{self.tracker}"
+                        raise UploadError(f"{self.tracker}: Unable to match any tags in unattended mode.")
                     while not new_data["tags"]:
                         logger.info(f"{self.tracker}: [yellow]Unable to match any tags")
                         logger.info(f"{self.tracker}: Valid tags can be found on the PassThePopcorn upload form")
-                        new_data["tags"] = console.input("Please enter at least one tag. Comma separated (action, animation, short):")
+                        new_data["tags"] = await prompt_in_thread(cli_ui.ask_string, "Please enter at least one tag. Comma separated (action, animation, short):")
                 else:
                     raise UploadError("PassThePopcorn requires at least one valid tag.")
             data.update(new_data)

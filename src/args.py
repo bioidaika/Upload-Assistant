@@ -6,7 +6,7 @@ import sys
 import urllib.parse
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 from src.book_prep import detect_newspaper, sanitize_book_author, sanitize_book_language
 from src.console import logger
@@ -33,6 +33,35 @@ MUSIC_RELEASE_TYPE_CHOICES = (
     "unknown",
 )
 
+PATHS_FROM_STDIN_OPTION = "--paths-from-stdin"
+
+
+def read_paths_from_stdin(argv: Sequence[str], stream: TextIO) -> tuple[list[str], list[str]]:
+    args = list(argv)
+    option_count = args.count(PATHS_FROM_STDIN_OPTION)
+    if option_count == 0 or "-h" in args or "--help" in args:
+        return args, []
+    if option_count > 1:
+        raise ValueError(f"{PATHS_FROM_STDIN_OPTION} may only be specified once")
+
+    args.remove(PATHS_FROM_STDIN_OPTION)
+    interactive = stream.isatty()
+    if interactive:
+        logger.info("[cyan]Paste one full path per line, then press Enter on an empty line to start.[/cyan]")
+
+    paths: list[str] = []
+    for line in stream:
+        path = line.rstrip("\r\n")
+        if not path.strip():
+            if interactive:
+                break
+            continue
+        paths.append(path)
+
+    if not paths:
+        raise ValueError(f"{PATHS_FROM_STDIN_OPTION} did not receive any paths")
+    return args, paths
+
 
 class ShortHelpFormatter(argparse.HelpFormatter):
     """
@@ -57,6 +86,7 @@ Common options:
   --queue (queue name)       Process an entire folder (including files/subfolders) in a queue
   -mf, --manual_frames       Comma-separated list of frame numbers to use for screenshots
   -df, --descfile            Path to custom description file
+  -boverview, --book-overview  Book/Audiobook overview/synopsis (overrides auto-detected value)
   -serv, --service           Streaming service
   --no-aka                   Remove AKA from title
   -daily, --daily            Air date of a daily type episode (YYYY-MM-DD)
@@ -103,6 +133,12 @@ class Args:
         )
 
         parser.add_argument("path", nargs="*", help="Path to file/directory (in single/double quotes is best)")
+        parser.add_argument(
+            PATHS_FROM_STDIN_OPTION,
+            action="store_true",
+            required=False,
+            help="Read one full path per line from standard input (finish an interactive paste with an empty line)",
+        )
         parser.add_argument("--queue", nargs=1, required=False, help="(--queue queue_name) Process an entire folder (files/subfolders) in a queue")
         parser.add_argument("-lq", "--limit-queue", dest="limit_queue", nargs=1, required=False, help="Limit the amount of queue files processed", type=int, default=0)
         parser.add_argument(
@@ -269,6 +305,7 @@ class Args:
         parser.add_argument("-year", "--year", dest="manual_year", nargs=1, required=False, help="Override the year found", type=int, default=0)
         parser.add_argument("-author", "--author", nargs="*", required=False, help="Book/Audiobook author name (overrides auto-detected value)", type=str, dest="book_author")
         parser.add_argument("-btitle", "--book-title", nargs="*", required=False, help="Book/Audiobook title (overrides auto-detected value)", type=str, dest="book_title")
+        parser.add_argument("--book-cover", nargs=1, required=False, help="BOOK: public artwork URL or local cover image path", dest="book_cover")
         parser.add_argument("--comic", "-comic", action="store_true", required=False, help="Identify the book upload as a Comic", dest="comic", default=False)
         parser.add_argument("--manga", "-manga", action="store_true", required=False, help="Identify the book upload as a Manga", dest="manga", default=False)
         parser.add_argument("--magazine", "-magazine", action="store_true", required=False, help="Identify the book upload as a Magazine", dest="magazine", default=False)
@@ -445,6 +482,17 @@ class Args:
             help="Custom description block to insert (path to file OR filename in current working directory). This is added as a section inside the final description and does NOT replace the auto-generated description (MediaInfo, screenshots, etc.)",
         )
         parser.add_argument(
+            "-boverview",
+            "--book-overview",
+            "-ov",
+            "--overview",
+            dest="book_overview",
+            nargs="*",
+            required=False,
+            help="Book/Audiobook overview/synopsis (overrides auto-detected value)",
+            type=str,
+        )
+        parser.add_argument(
             "-menus",
             "--menus",
             "-menu",
@@ -462,7 +510,21 @@ class Args:
             nargs=1,
             required=False,
             help="Image Host",
-            choices=["imgbb", "imgbox", "pixhost", "lensdump", "ptscreens", "onlyimage", "dalexni", "zipline", "passtheimage", "seedpool_cdn", "utppm", "lostimg"],
+            choices=[
+                "imgbb",
+                "imgbox",
+                "pixhost",
+                "lensdump",
+                "ptscreens",
+                "onlyimage",
+                "dalexni",
+                "zipline",
+                "midnightscene",
+                "passtheimage",
+                "seedpool_cdn",
+                "utppm",
+                "lostimg",
+            ],
         )
         parser.add_argument("-siu", "--skip-imagehost-upload", dest="skip_imghost_upload", action="store_true", required=False, help="Skip Uploading to an image host")
         parser.add_argument("-th", "--torrenthash", nargs=1, required=False, help="Torrent Hash to re-use from your client's session directory")
@@ -1023,6 +1085,15 @@ class Args:
         *langcodes* so both a human-readable name and the ISO 639-3 code are stored.
         Falls back gracefully when *langcodes* is unavailable or the code is unknown.
         """
+        book_overview_arg = meta.book_overview or meta.overview
+        if book_overview_arg not in (None, "", []):
+            overview_str = " ".join(str(x) for x in book_overview_arg if str(x)).strip() if isinstance(book_overview_arg, list) else str(book_overview_arg).strip()
+            meta.overview = overview_str
+            meta.book_overview = overview_str
+        else:
+            meta.overview = ""
+            meta.book_overview = ""
+
         book_author_arg = meta.book_author
         if book_author_arg not in (None, ""):
             meta.author = str(book_author_arg).strip()
@@ -1046,6 +1117,18 @@ class Args:
         book_publisher_arg = meta.book_publisher
         if book_publisher_arg not in (None, ""):
             meta.publisher = str(book_publisher_arg).strip()
+
+        book_cover_arg = meta.book_cover
+        if book_cover_arg not in (None, "", []):
+            cover = " ".join(str(x) for x in book_cover_arg if str(x)).strip() if isinstance(book_cover_arg, list) else str(book_cover_arg).strip()
+            if cover.startswith(("http://", "https://")):
+                meta.artwork_url = cover
+            elif cover:
+                cover_path = Path(cover).expanduser()
+                if cover_path.is_file():
+                    meta.artwork_path = str(cover_path.resolve())
+                else:
+                    logger.warning("[yellow]BOOK: --book-cover is neither a public HTTP(S) URL nor an existing image file; ignoring it.[/yellow]")
 
         book_translator_arg = meta.book_translator
         if book_translator_arg not in (None, ""):

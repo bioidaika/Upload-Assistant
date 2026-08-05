@@ -10,7 +10,8 @@ from urllib.parse import urljoin, urlsplit
 import aiofiles
 import httpx
 
-from cogs.redaction import Redaction
+from src.artwork import is_valid_image_bytes
+from src.cogs.redaction import Redaction
 from src.console import logger
 from src.get_desc import DescriptionBuilder
 from src.meta import Meta
@@ -320,7 +321,26 @@ class UNIT3D:
         return {"sd": f"{meta.sd}"}
 
     async def get_keywords(self, meta: Meta) -> dict[str, str]:
-        return {"keywords": ", ".join(meta.keywords)}
+        """
+        Enforces a 255-character limit on the keywords payload without cutting off individual words.
+        This complies with the UNIT3D database schema (VARCHAR(255)) and API validation rules
+        ('keywords' => 'nullable|string|max:255').
+        """
+        keywords_list: list[str] = []
+        current_len = 0
+        for kw in meta.keywords:
+            kw_str = kw.strip()
+            if not kw_str:
+                continue
+            needed = len(kw_str) + (2 if keywords_list else 0)
+            if current_len + needed > 255:
+                if not keywords_list and len(kw_str) > 255:
+                    keywords_list.append(kw_str[:255])
+                break
+            keywords_list.append(kw_str)
+            current_len += needed
+
+        return {"keywords": ", ".join(keywords_list)}
 
     async def get_personal_release(self, meta: Meta) -> dict[str, str]:
         personal_release = "1" if meta.personalrelease else "0"
@@ -424,6 +444,10 @@ class UNIT3D:
             logger.info(f"{self.tracker}: [yellow]Failed to read image {path}: {e}[/yellow]")
             return None
 
+        if not is_valid_image_bytes(image_bytes):
+            logger.info(f"{self.tracker}: [yellow]Invalid or unsupported image: {path}[/yellow]")
+            return None
+
         image_type: tuple[str, str] | None = None
         if image_bytes.startswith(b"\xff\xd8\xff"):
             image_type = (".jpg", "image/jpeg")
@@ -457,13 +481,13 @@ class UNIT3D:
             files["nfo"] = ("nfo_file.nfo", nfo_bytes, "text/plain")
 
         if meta.category not in ("MOVIE", "TV", "GAME"):
-            cover_path = meta.cover_path
+            cover_path = meta.artwork_path
             if cover_path:
                 cover_file = await self.get_image_file(cover_path)
                 if cover_file:
                     files["torrent-cover"] = cover_file
 
-            banner_path = meta.banner_path
+            banner_path = meta.artwork_banner_path
             if banner_path:
                 banner_file = await self.get_image_file(banner_path)
                 if banner_file:

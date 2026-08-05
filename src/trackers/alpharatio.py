@@ -145,8 +145,9 @@ class AlphaRatio:
         heading = "[color=green][size=6]"
         subheading = "[color=red][size=4]"
         heading_end = "[/size][/color]"
-        async with aiofiles.open(f"{meta.base_dir}{'/' + 'tmp' + '/'}{meta.uuid}/DESCRIPTION.txt", encoding="utf8") as f:
-            base = await f.read()
+        from src.description_review import get_base_description
+
+        base = get_base_description(meta)
         base = re.sub(r"\[center\]\[spoiler=Scene NFO:\].*?\[/center\]", "", base, flags=re.DOTALL)
         base = re.sub(r"\[center\]\[spoiler=FraMeSToR NFO:\].*?\[/center\]", "", base, flags=re.DOTALL)
         description = ""
@@ -361,12 +362,17 @@ class AlphaRatio:
 
         # Handle cover image input
         imdb_info = cast(dict[str, Any], meta.imdb_info or {})
-        cover = meta.poster or imdb_info.get("cover", None)
-        while cover is None and not meta.unattended:
-            cover = Prompt.ask("No Cover was found. Please input a link to a cover:", default="")
-            if not re.match(r"https?://.*\.(jpg|png|gif)$", cover):
-                logger.info(f"{self.tracker}: [red]Invalid image link. Please enter a link that ends with .jpg, .png, or .gif.")
-                cover = None
+        cover = meta.artwork_url or imdb_info.get("cover", None)
+        if cover is None:
+            if meta.unattended and not meta.unattended_confirm:
+                logger.info(f"{self.tracker}: [yellow]Unattended mode: No cover image found. Skipping {self.tracker} upload.[/yellow]")
+                meta.skipping = f"{self.tracker}"
+                return False
+            while cover is None:
+                cover = Prompt.ask("No Cover was found. Please input a link to a cover:", default="")
+                if not re.match(r"https?://.*\.(jpg|png|gif)$", cover):
+                    logger.info(f"{self.tracker}: [red]Invalid image link. Please enter a link that ends with .jpg, .png, or .gif.")
+                    cover = None
 
         # Tag Compilation
         genres_raw = meta.genres

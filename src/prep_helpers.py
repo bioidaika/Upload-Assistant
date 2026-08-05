@@ -113,10 +113,14 @@ def init_meta(prep_instance: Any, meta: Meta, mode: str) -> tuple[bool, bool, Cl
     use_radarr = prep_instance.config["DEFAULT"].get("use_radarr", False)
     meta.print_tracker_messages = prep_instance.config["DEFAULT"].get("print_tracker_messages", False)
     meta.print_tracker_links = prep_instance.config["DEFAULT"].get("print_tracker_links", True)
-    only_id_val = meta.only_id
-    skip_tracker_descriptions = bool(prep_instance.config["DEFAULT"].get("skip_tracker_descriptions", False) if only_id_val is None else only_id_val)
-    meta.skip_tracker_descriptions = skip_tracker_descriptions
-    meta.keep_images = bool(prep_instance.config["DEFAULT"].get("keep_images", True) if not meta.keep_images else True)
+    from src.tracker_descriptions import resolve_description_mode
+
+    description_mode = resolve_description_mode(prep_instance.config["DEFAULT"].get("tracker_description_mode", "text"))
+    if meta.only_id:
+        description_mode = resolve_description_mode("ids")
+    meta.tracker_description_mode = description_mode.value
+    meta.keep_images = description_mode.imports_images
+    meta.skip_tracker_descriptions = not description_mode.imports_text
     mkbrr_threads = prep_instance.config["DEFAULT"].get("mkbrr_threads", "0")
     meta.mkbrr_threads = mkbrr_threads
 
@@ -144,7 +148,7 @@ def init_meta(prep_instance: Any, meta: Meta, mode: str) -> tuple[bool, bool, Cl
 
     logger.debug(f"[cyan]ID: {meta.uuid}")
 
-    return use_sonarr, use_radarr, client, skip_tracker_descriptions, hash_ids, tracker_ids
+    return use_sonarr, use_radarr, client, meta.skip_tracker_descriptions, hash_ids, tracker_ids
 
 
 async def detect_disc_and_category(prep_instance: Any, meta: Meta) -> tuple[str, dict[str, Any]]:
@@ -160,25 +164,74 @@ async def detect_disc_and_category(prep_instance: Any, meta: Meta) -> tuple[str,
     if isinstance(meta.manual_category, str) and meta.manual_category.strip():
         meta.category = meta.manual_category.strip().upper()
 
-    # Auto-detect MUSIC before BOOK: music releases are commonly multi-file FLAC
-    # directories, whereas audiobooks remain BOOK through their dedicated flow.
-    if not meta.category and not meta.manual_category and not meta.is_disc:
-        music_extensions = {".flac", ".mp3", ".m4a", ".aac", ".ac3", ".dts", ".wav", ".aiff", ".alac", ".ogg", ".opus", ".ape", ".wv"}
+    # If category is manually set to BOOK, ensure meta.audiobook is set if audio files are present
+    if meta.category == "BOOK" and not meta.audiobook:
         path_to_check = Path(meta.path) if meta.path else None
         if path_to_check and path_to_check.exists():
-            if path_to_check.is_file() and path_to_check.suffix.lower() in music_extensions:
-                meta.category = "MUSIC"
-            elif path_to_check.is_dir():
-                # Stop as soon as representative content is found; do not scan an
-                # entire music library merely to classify a release.
-                for item in path_to_check.rglob("*"):
-                    if item.is_file() and item.suffix.lower() in music_extensions:
-                        meta.category = "MUSIC"
-                        break
-            if meta.category == "MUSIC":
-                logger.debug("[cyan]Auto-detected category: MUSIC[/cyan]")
+            from src.audio_classifier import AUDIOBOOK_CONTAINER_EXTENSIONS, SHARED_AUDIO_EXTENSIONS
 
-    # Auto-detect BOOK category if category/manual_category is not already set and it's not a disc
+            audio_exts = SHARED_AUDIO_EXTENSIONS | AUDIOBOOK_CONTAINER_EXTENSIONS
+            if path_to_check.is_file() and path_to_check.suffix.lower() in audio_exts:
+                meta.audiobook = True
+            elif path_to_check.is_dir():
+                for item in path_to_check.rglob("*"):
+                    if item.is_file() and item.suffix.lower() in audio_exts:
+                        meta.audiobook = True
+                        break
+
+    # Auto-detect audio release category (BOOK audiobook vs MUSIC) if category/manual_category is not already set and it's not a disc
+    if not meta.category and not meta.manual_category and not meta.is_disc:
+        path_to_check = Path(meta.path) if meta.path else None
+        if path_to_check and path_to_check.exists():
+            from src.audio_classifier import detect_audio_category
+
+            audio_res = await detect_audio_category(meta, path_to_check)
+            if audio_res.category in ("BOOK", "MUSIC"):
+                meta.category = audio_res.category
+                meta.audiobook = audio_res.is_audiobook
+                logger.debug(f"[cyan]Auto-detected category: {meta.category}[/cyan]")
+                if audio_res.is_audiobook:
+                    logger.debug("[cyan]Subtype: AUDIOBOOK[/cyan]")
+                if audio_res.evidence:
+                    logger.debug("[cyan]Evidence:[/cyan]")
+                    for ev in audio_res.evidence:
+                        logger.debug(f"[cyan]- {ev}[/cyan]")
+            elif audio_res.category == "AMBIGUOUS":
+                unattended = getattr(meta, "unattended", False)
+                unattended_confirm = getattr(meta, "unattended_confirm", False)
+
+                logger.warning("[yellow]Audio category is ambiguous: could not confidently determine whether this is MUSIC or an AUDIOBOOK.[/yellow]")
+                if audio_res.evidence:
+                    logger.warning("[yellow]Evidence evaluated:[/yellow]")
+                    for ev in audio_res.evidence:
+                        logger.warning(f"[yellow]- {ev}[/yellow]")
+
+                if not unattended or (unattended and unattended_confirm):
+                    try:
+                        choice = cli_ui.ask_choice(
+                            "Choose category for audio release:",
+                            choices=["1. Music", "2. Audiobook"],
+                        )
+                    except EOFError, KeyboardInterrupt:
+                        logger.error("[bold red]Category selection cancelled or failed.[/bold red]")
+                        sys.exit(1)
+                    if choice is None:
+                        logger.error("[bold red]Category selection cancelled or failed.[/bold red]")
+                        sys.exit(1)
+                    if choice.startswith("1") or choice.lower() == "music":
+                        meta.category = "MUSIC"
+                        meta.audiobook = False
+                    else:
+                        meta.category = "BOOK"
+                        meta.audiobook = True
+                    logger.info(f"[cyan]Category selected interactively: {meta.category}[/cyan]")
+                else:
+                    logger.error("[bold red]Could not confidently distinguish MUSIC from AUDIOBOOK in unattended mode.[/bold red]")
+                    logger.error("[yellow]Specify one of: -c book or -c music[/yellow]")
+                    logger.error("[yellow]Skipping this release instead of assigning an unsafe category.[/yellow]")
+                    sys.exit(1)
+
+    # Fallback auto-detect BOOK category if category/manual_category is not already set and it's not a disc
     if not meta.category and not meta.manual_category and not meta.is_disc:
         is_book = False
         video_extensions = {".mkv", ".mp4", ".ts"}
@@ -648,18 +701,6 @@ async def process_trackers_and_torrent(
 ) -> None:
     if "description" not in meta or meta.description is None:
         meta.description = ""
-
-    description_text = meta.description
-    if description_text is None:
-        description_text = ""
-    async with aiofiles.open(
-        f"{meta.base_dir}{'/' + 'tmp' + '/'}{meta.uuid}/DESCRIPTION.txt",
-        "w",
-        newline="",
-        encoding="utf8",
-    ) as description:
-        if len(description_text):
-            await description.write(description_text)
 
     meta.skip_trackers = False
 

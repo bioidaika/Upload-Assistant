@@ -7,7 +7,7 @@ from typing import Any, cast
 import aiofiles
 import httpx
 
-from cogs.redaction import Redaction
+from src.cogs.redaction import Redaction
 from src.console import logger
 from src.get_desc import DescriptionBuilder
 from src.meta import Meta
@@ -73,7 +73,7 @@ class RetroFlix:
             "url": f"{imdb_url}/" if imdb_url else "",
             # auto pulled from IMDB
             "descr": "",
-            "poster": meta.poster if meta.poster is not None else "",
+            "poster": meta.artwork_url,
             "type": "401" if meta.category == "MOVIE" else "402",
             "screenshots": screenshots,
             "isAnonymous": self.config["TRACKERS"][self.tracker]["anon"],

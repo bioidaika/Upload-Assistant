@@ -14,11 +14,12 @@ import httpx
 import requests
 import tmdbsimple as tmdb
 
-from cogs.redaction import Redaction
 from src.bbcode import BBCODE
+from src.cogs.redaction import Redaction
 from src.console import logger
 from src.meta import Meta
-from src.rehostimages import RehostImagesManager
+from src.rehostimages import ImageHostPolicy, RehostImagesManager
+from src.tracker_images import get_tracker_image_collection
 from src.trackers.common import Common
 
 Config = dict[str, Any]
@@ -39,6 +40,16 @@ class TVChaosUK:
     signature = ""
     banned_groups = ()
     approved_image_hosts = ("imgbb", "imgbox", "pixhost", "bam", "onlyimage")
+    image_host_policy = ImageHostPolicy(
+        {
+            "ibb.co": "imgbb",
+            "imgbox.com": "imgbox",
+            "pixhost.to": "pixhost",
+            "imagebam.com": "bam",
+            "onlyimage.org": "onlyimage",
+        },
+        approved_image_hosts,
+    )
     upload_url = f"{base_url}/api/torrents/upload"
     search_url = f"{base_url}/api/torrents/filter"
     torrent_url = f"{base_url}/torrents/"
@@ -90,11 +101,14 @@ class TVChaosUK:
             return date_str
 
     async def _read_base_description(self, meta: Meta) -> str:
-        """Read the base DESCRIPTION.txt file if it exists."""
-        try:
-            return await self.read_file(f"{meta.base_dir}{'/' + 'tmp' + '/'}{meta.uuid}/DESCRIPTION.txt")
-        except FileNotFoundError:
-            return ""
+        """Load a saved base description without blocking the event loop."""
+        from src.description_review import get_base_description
+
+        draft_meta = meta.copy()
+        description = await asyncio.to_thread(get_base_description, draft_meta)
+        for key in ("description", "description_override", "saved_description"):
+            meta[key] = draft_meta.get(key)
+        return description
 
     def _ensure_desc_directory(self, meta: Meta, tracker: str) -> str:
         """Create description directory and return file path."""
@@ -435,22 +449,10 @@ class TVChaosUK:
 
         return await asyncio.to_thread(_read)
 
-    async def check_image_hosts(self, meta: Meta) -> None:
-        url_host_mapping = {
-            "ibb.co": "imgbb",
-            "imgbox.com": "imgbox",
-            "pixhost.to": "pixhost",
-            "imagebam.com": "bam",
-            "onlyimage.org": "onlyimage",
-        }
-
-        await self.rehost_images_manager.check_hosts(meta, self.tracker, url_host_mapping=url_host_mapping, img_host_index=1, approved_image_hosts=self.approved_image_hosts)
-        return
-
     async def upload(self, meta: Meta) -> bool | None:
         common = Common(config=self.config)
 
-        raw_images = meta.TVC_images_key if meta.TVC_images_key is not None else meta.get("image_list", [])
+        raw_images = get_tracker_image_collection(meta, self.tracker, "screenshots")
         image_list_seq: list[Any]
         if isinstance(raw_images, list):
             image_list_seq = raw_images
@@ -499,7 +501,7 @@ class TVChaosUK:
         desc = await self.edit_desc(meta, self.tracker, self.signature, image_list)
 
         if not desc:
-            logger.warning(f"{self.tracker}: [yellow]Warning: DESCRIPTION.txt file not found at {descfile_path}")
+            logger.warning(f"{self.tracker}: [yellow]Warning: tracker-specific description file not found at {descfile_path}")
             desc = ""
 
         # Naming logic
@@ -812,13 +814,13 @@ class TVChaosUK:
         comparison: bool = False,
     ) -> str:
         """
-        Build and write the tracker-specific DESCRIPTION.txt file (FNP multi-block style).
+        Build and write the tracker-specific debug description file (FNP multi-block style).
 
         Constructs BBCode-formatted description text for discs, TV packs,
         episodes, or movies using multiple separate [center] blocks.
         Always writes a non-empty description file to tmp/<uuid>/[TVCHAOSUK]DESCRIPTION.txt.
         """
-        # Read base description file
+        # Read the authoritative in-memory base description.
         base = await self._read_base_description(meta)
 
         # Ensure output directory exists

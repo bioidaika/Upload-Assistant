@@ -13,11 +13,11 @@ import aiofiles
 import cli_ui
 from rich.markup import escape
 
-from cogs.redaction import Redaction
 from src.bdinfo_comparator import compare_bdinfo, has_bdinfo_content
 from src.cleanup import cleanup_manager
+from src.cogs.redaction import Redaction
 from src.config_helpers import format_terminal_link
-from src.console import logger
+from src.console import logger, prompt_in_thread
 from src.meta import Meta
 from src.trackersetup import tracker_class_map
 
@@ -119,9 +119,9 @@ def _music_confirmation_lines(meta: Meta, missing_warning: str) -> list[tuple[st
         edition_details = " / ".join(part for part in (edition, edition_year) if part)
         lines.append(("Edition", edition_details))
 
-    if re.match(r"^https?://[^/]+", str(meta.cover or "").strip(), flags=re.IGNORECASE):
+    if re.match(r"^https?://[^/]+", str(meta.artwork_url or "").strip(), flags=re.IGNORECASE):
         artwork = "public URL supplied"
-    elif Path(str(meta.cover_path or "")).is_file():
+    elif Path(str(meta.artwork_path or "")).is_file():
         artwork = "local/embedded artwork available"
         if meta.debug:
             artwork += "; host upload skipped in debug"
@@ -253,7 +253,7 @@ class UploadHelper:
     async def prompt_yes_no(self, question: str, *, default: bool = False) -> bool:
         """Ask one interactive question at a time without blocking the event loop."""
         async with self._prompt_lock:
-            return await asyncio.to_thread(cli_ui.ask_yes_no, question, default=default)
+            return await prompt_in_thread(cli_ui.ask_yes_no, question, default=default)
 
     async def dupe_check(self, dupes: list[DupeEntry | str], meta: Meta, tracker_name: str) -> tuple[bool, Meta]:
         def _format_dupe(entry: DupeEntry | str) -> str:
@@ -311,6 +311,11 @@ class UploadHelper:
                 display_name = str(tracker_rename_dict.get("name", ""))
             elif isinstance(tracker_rename, str):
                 display_name = tracker_rename
+
+        if meta.dupe is False and meta.season_pack_exists and bool(getattr(tracker_class, "reject_episode_if_season_pack_exists", False)):
+            pack_name = meta.season_pack_name or "matching season pack"
+            logger.info(f"[bold red]{tracker_name}: {pack_name} already contains this episode. Skipping individual episode upload.[/bold red]")
+            return True, meta
 
         # Show naming change before dupe prompts so user knows what the final name will be
         pass
@@ -550,7 +555,7 @@ class UploadHelper:
             asin = meta.asin or ""  # not essential
             narrator = meta.narrator or missing_warning
             audiobook_duration_formatted = meta.audiobook_duration_formatted or missing_warning
-            poster = meta.poster or "[yellow][italic]not found online - will be auto-generated[/italic][/yellow]"
+            poster = "Found" if bool(meta.artwork_url or meta.artwork_path) else missing_warning
             comic = meta.comic
             manga = meta.manga
             magazine = meta.magazine
@@ -589,7 +594,7 @@ class UploadHelper:
             developer = meta.developer or missing_warning
             publisher = meta.publisher or missing_warning
             platform = meta.platform or missing_warning
-            poster = meta.poster or missing_warning
+            poster = "Found" if bool(meta.artwork_url or meta.artwork_path) else missing_warning
             igdb_id = meta.igdb_id or "0"
             steam_url = meta.steam_url
             languages = len(meta.languages) if meta.languages else missing_warning

@@ -14,8 +14,8 @@ from bs4 import BeautifulSoup
 from bs4.element import AttributeValueList
 from unidecode import unidecode
 
-from cogs.redaction import Redaction
 from src.bbcode import BBCODE
+from src.cogs.redaction import Redaction
 from src.console import console, logger
 from src.meta import Meta
 from src.temp_paths import screenshots_dir
@@ -94,7 +94,9 @@ class TorrentHR:
         if subs:
             payload["subs[]"] = tuple(subs)
 
-        thr_upload_prompt = True if not meta.debug else cli_ui.ask_yes_no("send to takeupload.php?", default=False)
+        thr_upload_prompt = (
+            True if not meta.debug else (False if (meta.unattended and not meta.unattended_confirm) else cli_ui.ask_yes_no("send to takeupload.php?", default=False))
+        )
 
         if thr_upload_prompt is True:
             await asyncio.sleep(0.5)
@@ -201,11 +203,9 @@ class TorrentHR:
     async def edit_desc(self, meta: Meta) -> bool:
         pronfo = False
         bbcode = BBCODE()
-        async with aiofiles.open(
-            f"{meta.base_dir}{'/' + 'tmp' + '/'}{meta.uuid}/DESCRIPTION.txt",
-            encoding="utf-8",
-        ) as base_file:
-            base = await base_file.read()
+        from src.description_review import get_base_description
+
+        base = get_base_description(meta)
 
         desc_parts: list[str] = []
         tag_value = meta.tag

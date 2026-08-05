@@ -9,10 +9,12 @@ import cli_ui
 import httpx
 from rich.markup import escape
 
-from cogs.redaction import Redaction
+from src.cogs.redaction import Redaction
 from src.console import logger
+from src.description_review import get_base_description
 from src.meta import Meta
-from src.rehostimages import RehostImagesManager
+from src.rehostimages import ImageHostPolicy, RehostImagesManager
+from src.tracker_images import get_tracker_image_collection
 from src.trackers.common import Common
 
 
@@ -59,6 +61,16 @@ class BEYONDHD:
         "YIFY",
     )
     approved_image_hosts = ("imgbox", "imgbb", "pixhost", "bhd", "bam")
+    image_host_policy = ImageHostPolicy(
+        {
+            "ibb.co": "imgbb",
+            "pixhost.to": "pixhost",
+            "imgbox.com": "imgbox",
+            "beyondhd.co": "bhd",
+            "imagebam.com": "bam",
+        },
+        approved_image_hosts,
+    )
     base_url = "https://beyond-hd.me"
     upload_url = f"{base_url}/api/upload/"
     torrent_url = f"{base_url}/details/"
@@ -72,24 +84,6 @@ class BEYONDHD:
         self.tracker_config = cast(dict[str, Any], trackers_cfg.get("BEYONDHD", {}))
         api_key = str(self.tracker_config.get("api_key", "")).strip()
         self.requests_url = f"{self.base_url}/api/requests/{api_key}"
-
-    async def check_image_hosts(self, meta: Meta) -> None:
-        url_host_mapping = {
-            "ibb.co": "imgbb",
-            "pixhost.to": "pixhost",
-            "imgbox.com": "imgbox",
-            "beyondhd.co": "bhd",
-            "imagebam.com": "bam",
-        }
-
-        await self.rehost_images_manager.check_hosts(
-            meta,
-            self.tracker,
-            url_host_mapping=url_host_mapping,
-            img_host_index=1,
-            approved_image_hosts=self.approved_image_hosts,
-        )
-        return
 
     async def upload(self, meta: Meta) -> bool:
         common = Common(config=self.config)
@@ -275,9 +269,19 @@ class BEYONDHD:
 
     async def edit_desc(self, meta: Meta) -> None:
         desc_path = f"{meta.base_dir}{'/' + 'tmp' + '/'}{meta.uuid}/[{self.tracker}]DESCRIPTION.txt"
-        base_path = f"{meta.base_dir}{'/' + 'tmp' + '/'}{meta.uuid}/DESCRIPTION.txt"
-        async with aiofiles.open(base_path, encoding="utf-8") as f:
-            base = await f.read()
+        base = get_base_description(meta)
+        for collection_name in ("menu_images", "spectrograms_images"):
+            original_images = getattr(meta, collection_name, [])
+            rehosted_images = get_tracker_image_collection(meta, self.tracker, collection_name)
+            if not isinstance(original_images, list) or not isinstance(rehosted_images, list):
+                continue
+            for original, rehosted in zip(original_images, rehosted_images, strict=False):
+                if not isinstance(original, dict) or not isinstance(rehosted, dict):
+                    continue
+                original_url = original.get("raw_url")
+                rehosted_url = rehosted.get("raw_url")
+                if isinstance(original_url, str) and isinstance(rehosted_url, str) and original_url != rehosted_url:
+                    base = base.replace(original_url, rehosted_url)
         async with aiofiles.open(desc_path, "w", encoding="utf-8") as desc:
             discs = cast(list[dict[str, Any]], meta.discs or [])
             if discs:
@@ -333,7 +337,7 @@ class BEYONDHD:
                     await desc.write("\n\n")
             except Exception as e:
                 logger.warning(f"{self.tracker}: [yellow]Warning: Error setting tonemapped header: {escape(str(e))}[/yellow]")
-            images = cast(list[dict[str, Any]], meta.get(f"{self.tracker}_images_key") or meta.image_list or [])
+            images = cast(list[dict[str, Any]], get_tracker_image_collection(meta, self.tracker, "screenshots"))
             if len(images) > 0:
                 await desc.write("[align=center]")
                 for each in range(len(images[: meta.screens])):

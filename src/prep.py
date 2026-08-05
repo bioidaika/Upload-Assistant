@@ -5,7 +5,7 @@ from pathlib import Path
 # Upload Assistant © 2025 Audionut & wastaken7 — Licensed under UAPL v1.0
 from typing import Any, cast
 
-from cogs.redaction import PathAwareEncoder
+from src.cogs.redaction import PathAwareEncoder
 from src.meta import Meta
 from src.metadata_cache import set_run_disabled
 
@@ -117,12 +117,29 @@ class Prep:
         """Run the non-destructive MUSIC pipeline instead of video preparation."""
         await _gather_music_prep_fn(meta, self.config)
 
+    async def _publish_initial_webui_snapshot(self, meta: Meta) -> None:
+        """Make the current release available to WebUI controls during preparation."""
+        if not meta.uuid:
+            return
+        meta_file = Path(meta.base_dir) / "tmp" / meta.uuid / "meta.json"
+        meta_file.parent.mkdir(parents=True, exist_ok=True)
+        async with aiofiles.open(meta_file, "w", encoding="utf-8") as snapshot:
+            await snapshot.write(json.dumps(meta.to_dict(), indent=4, cls=PathAwareEncoder))
+        try:
+            from upload import _publish_webui_preview_target
+
+            _publish_webui_preview_target(str(meta.path or ""), meta.uuid)
+        except Exception:
+            # CLI preparation deliberately has no dependency on the WebUI server.
+            return
+
     async def gather_prep(self, meta: Meta, mode: str) -> Meta:
         meta_start_time = time.time()
         set_run_disabled(bool(getattr(meta, "no_metadata_cache", False)))
 
         # 1. Init metadata settings
         use_sonarr, use_radarr, client, skip_tracker_descriptions, hash_ids, tracker_ids = prep_helpers.init_meta(self, meta, mode)
+        await self._publish_initial_webui_snapshot(meta)
 
         # 2. Disc and Category Detection
         videoloc, bdinfo = await prep_helpers.detect_disc_and_category(self, meta)
@@ -284,6 +301,7 @@ class Prep:
                     meta,
                     manual_frames=meta.manual_frames or "",
                     cleanup_after_capture=False,
+                    capture_group="main",
                 )
             logger.debug("[cyan]Early screenshot generation completed.[/cyan]")
         except asyncio.CancelledError:

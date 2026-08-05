@@ -18,89 +18,10 @@ class CapybaraBR(UNIT3D):
     display_name = "CapybaraBR"
     base_url = "https://capybarabr.com"
     allows_bloated_audio = True
-    banned_groups = (
-        "4K4U",
-        "afm72",
-        "Alcaide_Kira",
-        "AROMA",
-        "ASM",
-        "Bandi",
-        "BiTOR",
-        "BLUDV",
-        "Bluespots",
-        "BOLS",
-        "CaNNIBal",
-        "Comando",
-        "d3g",
-        "DepraveD",
-        "EMBER",
-        "Emmid",
-        "FGT",
-        "FreetheFish",
-        "Garshasp",
-        "Ghost",
-        "Grym",
-        "HDS",
-        "Hi10",
-        "HiQVE",
-        "Hiro360",
-        "ImE",
-        "ION10",
-        "iVy",
-        "Judas",
-        "LAMA",
-        "Langbard",
-        "Lapumia",
-        "LION",
-        "MeGusta",
-        "Memoriadatv",
-        "MONOLITH",
-        "MRCS",
-        "NaNi",
-        "Natty",
-        "nikt0",
-        "OEPlus",
-        "OFT",
-        "OsC",
-        "Panda",
-        "PANDEMONiUM",
-        "PHOCiS",
-        "PiRaTeS",
-        "PYC",
-        "r00t",
-        "Ralphy",
-        "RARBG",
-        "RetroPeeps",
-        "RZeroX",
-        "S74Ll10n",
-        "SAMPA",
-        "Sicario",
-        "SiCFoI",
-        "Silence",
-        "SkipTT",
-        "SM737",
-        "SPDVD",
-        "STUTTERSHIT",
-        "SWTYBLZ",
-        "t3nzin",
-        "TAoE",
-        "TEKNO3D",
-        "Telly",
-        "TGx",
-        "Tigole",
-        "TSP",
-        "TSPxL",
-        "TWA",
-        "UnKn0wn",
-        "VXT",
-        "Vyndros",
-        "W32",
-        "Will1869",
-        "x0r",
-        "YIFY",
-        "YTS.MX",
-        "YTS",
-    )
+    banned_groups: tuple[str, ...] = ()
+    banned_url = f"{base_url}/api/banned-groups"
+    banned_groups_auth_mode = "api_token"
+    banned_groups_response_key = "groups"
     id_url = f"{base_url}/api/torrents/"
     upload_url = f"{base_url}/api/torrents/upload"
     search_url = f"{base_url}/api/torrents/filter"
@@ -357,14 +278,6 @@ class CapybaraBR(UNIT3D):
                 )
                 return False
 
-            if not bool(meta.subtitle_files):
-                subtitles = await self.common.check_language_requirements(
-                    meta, self.tracker, languages_to_check=["portuguese", "português"], check_audio=True, check_subtitle=True
-                )
-                if not subtitles and (not meta.unattended or (meta.unattended and meta.unattended_confirm)):
-                    return await self.common.prompt_user_for_confirmation(
-                        f"{self.tracker}: No Portuguese audio or subtitles found. Do you want to proceed with the upload?",
-                    )
-                return subtitles
+            return await self.common.check_portuguese_video_requirements(meta, self.tracker)
 
         return True

@@ -1053,6 +1053,11 @@ async def prepare_and_upload_usenet(meta: Meta, config: dict[str, Any], *, prepa
         archive_out = Path(usenet_dir) / f"{archive_name}.7z"
 
         if await aiofiles.ospath.isdir(input_path) or volume_size or archive_password:
+            archive_artifact_pattern = re.compile(rf"{re.escape(archive_out.name)}(?:\.\d+)?")
+            for stale_archive in usenet_dir.iterdir():
+                if stale_archive.is_file() and archive_artifact_pattern.fullmatch(stale_archive.name):
+                    stale_archive.unlink()
+
             cmd_7z = [path_7z or "7z", "a", "-mx=0"]
             if volume_size:
                 cmd_7z.append(f"-v{volume_size.lower()}")
@@ -1095,7 +1100,11 @@ async def prepare_and_upload_usenet(meta: Meta, config: dict[str, Any], *, prepa
             # No -n/-u/-l flag: par2cmdline falls back to its default scheme of
             # exponentially-sized recovery volumes, matching standard Usenet posts
             # and letting repair tools fetch only as much recovery data as needed.
-            cmd_par2 = [path_par2 or "par2", "c", f"-r{par2_percentage}", par2_file, *[str(f) for f in relative_target_files]]
+            # The PAR2 file may be staged outside ``upload_root`` when
+            # ``skip_archive`` posts source files directly.  Explicitly set
+            # the data-file base path so par2 does not infer it from the
+            # output file's directory and reject the source files.
+            cmd_par2 = [path_par2 or "par2", "c", f"-r{par2_percentage}", f"-B{upload_root}", par2_file, *[str(f) for f in relative_target_files]]
             if is_debug and not path_par2:
                 logger.info(f"[yellow][DEBUG SIMULATION] Would run: {' '.join(cmd_par2)}[/yellow]")
                 mock_par2 = os.path.normpath(par2_file)

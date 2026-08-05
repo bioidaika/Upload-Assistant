@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="logo.svg" alt="Upload Assistant Logo" width="160" height="160" />
+  <img src="docs/assets/logo.svg" alt="Upload Assistant Logo" width="160" height="160" />
   <h1>Upload-Assistant</h1>
   <p>Streamline media preparation and uploads across private trackers & usenet indexers.</p>
 
@@ -12,18 +12,20 @@
 
 ## Table of Contents
 
-- [Fork Features & Differences](#fork-features--differences-from-upstream-audionutupload-assistant)
+- [Fork Features & Differences from Upstream (Audionut/Upload-Assistant)](#fork-features--differences-from-upstream-audionutupload-assistant)
   - [1. New Media Category Support](#1-new-media-category-support)
   - [2. Audio Stream Spectrogram Generation](#2-audio-stream-spectrogram-generation)
   - [3. qBittorrent Bandwidth Control](#3-qbittorrent-bandwidth-control)
   - [4. Argument-Embedded Text Queue](#4-argument-embedded-text-queue)
-  - [5. Extended Tracker Support](#5-extended-tracker-support)
-  - [6. Usenet & Indexer Posting](#6-usenet--indexer-posting)
+  - [5. Usenet & Indexer Posting](#5-usenet--indexer-posting)
+  - [6. Interactive Screenshot Review Workflow](#6-interactive-screenshot-review-workflow)
+  - [7. Persistent TTL-Based Metadata Cache](#7-persistent-ttl-based-metadata-cache)
+  - [8. Modern Web UI & Real-Time Engine](#8-modern-web-ui--real-time-engine)
 - [Supported Sites](#supported-sites)
 - [Setup Guide](#setup-guide)
   - [Step 1: Install Required Tools](#step-1-install-required-tools)
-  - [Step 2: Download Upload Assistant](#step-2-download-upload-assistant)
-  - [Step 3: Install Python Packages](#step-3-install-python-packages)
+  - [Step 2: Download Upload Assistant](#step-2-download-upload-assistant-linuxmacos)
+  - [Step 3: Install Python Packages](#step-3-install-python-packages-linuxmacos)
   - [Step 4: Configure the Assistant](#step-4-configure-the-assistant)
 - [Updating](#updating)
 - [CLI Usage](#cli-usage)
@@ -72,15 +74,25 @@ This branch introduces new media categories and automation features not present 
 - **shlex-Split Parsing**: Allows specifying unique CLI arguments (e.g., different IMDB IDs, tags, or tracker targets) for each file/folder on its respective line.
 - **Resume Capability**: Logs processed lines to prevent reprocessing completed uploads if a queue run is interrupted.
 
-### 5. Extended Tracker Support
-
-- **Added Trackers**: Zenith (ZENITH), MidnightScene (MIDNIGHTSCENE), M-Team (MTEAM), LongPT (LONGPT), lajidui (LAJIDUI), ptcafe (PTCAFE), PTFans (PTFANS), PT GTK (PTGTK), RailgunPT (RAILGUNPT).
-
-### 6. Usenet & Indexer Posting
+### 5. Usenet & Indexer Posting
 
 - **Usenet Upload Support**: Automatically archives and splits files/folders (via `7z`), generates parity recovery blocks (via `par2`), and uploads them to Usenet (via `nyuu`).
 - **Anonymity & Privacy**: Generates randomized poster details and obfuscates post subject lines to protect privacy.
 - **Indexer Integration**: Automatically uploads the generated `.nzb` file to configured Usenet indexers.
+
+### 6. Interactive Screenshot Review Workflow
+
+- **Manual Screenshot Review**: Inspect, add, delete, or replace/recapture individual frames before uploading through the interactive Web UI.
+
+### 7. Persistent TTL-Based Metadata Cache
+
+- **Provider-Scoped API Caching**: Disk-cached metadata for TMDb, IMDb, TVDB, TVmaze, OpenLibrary, IGDB, Discogs, and MusicBrainz.
+- **Performance & Rate Limit Protection**: Configurable TTL and negative caching reuse fetched metadata across runs, avoiding redundant API calls and preventing rate-limiting bans.
+
+### 8. Modern Web UI & Real-Time Engine
+
+- **Full Parity Web UI**: Modern interface providing full feature parity with CLI options (`--webui`).
+- **Real-Time Execution & Presets**: Live log streams, real-time preparation preview, preset saving, and interactive screenshot management.
 
 ## Supported Sites
 
@@ -102,7 +114,7 @@ This branch introduces new media categories and automation features not present 
 | <img src="web_ui/static/img/trackers/bjshare.png" width="16" height="16" />                | BrasilJapão-Share      | BJSHARE                | MOVIE, TV, BOOK, GAME        |
 | <img src="web_ui/static/img/trackers/brasiltracker.png" width="16" height="16" />          | BrasilTracker          | BRASILTRACKER          | MOVIE, TV, BOOK, GAME        |
 | <img src="web_ui/static/img/trackers/capybarabr.png" width="16" height="16" />             | CapybaraBR             | CAPYBARABR             | MOVIE, TV, BOOK, GAME        |
-| <img src="web_ui/static/img/trackers/cathoderaytube.png" width="16" height="16" />       | Cathode-Ray.Tube       | CATHODERAYTUBE         | MOVIE, TV, GAME              |
+| <img src="web_ui/static/img/trackers/cathoderaytube.png" width="16" height="16" />         | Cathode-Ray.Tube       | CATHODERAYTUBE         | MOVIE, TV, GAME              |
 | <img src="web_ui/static/img/trackers/cinematik.png" width="16" height="16" />              | Cinematik              | CINEMATIK              | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/cinemaz.png" width="16" height="16" />                | CinemaZ                | CINEMAZ                | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/darkpeers.png" width="16" height="16" />              | DarkPeers              | DARKPEERS              | MOVIE, TV, BOOK, GAME, MUSIC |
@@ -133,6 +145,7 @@ This branch introduces new media categories and automation features not present 
 | <img src="web_ui/static/img/trackers/morethantv.png" width="16" height="16" />             | MoreThanTV             | MORETHANTV             | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/mteam.png" width="16" height="16" />                  | M-Team                 | MTEAM                  | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/nebulance.png" width="16" height="16" />              | Nebulance              | NEBULANCE              | TV                           |
+| <img src="web_ui/static/img/trackers/nordicquality.png" width="16" height="16" />          | NordicQuality          | NORDICQUALITY          | MOVIE, TV, MUSIC, BOOK, GAME |
 | <img src="web_ui/static/img/trackers/oldtoonsworld.png" width="16" height="16" />          | OldToonsWorld          | OLDTOONSWORLD          | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/onlyencodes.png" width="16" height="16" />            | OnlyEncodes+           | ONLYENCODES            | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/orpheus.png" width="16" height="16" />                | Orpheus                | ORPHEUS                | MUSIC                        |
@@ -151,6 +164,7 @@ This branch introduces new media categories and automation features not present 
 | <img src="web_ui/static/img/trackers/rastastugan.png" width="16" height="16" />            | Rastastugan            | RASTASTUGAN            | MOVIE, TV, BOOK, GAME, MUSIC |
 | <img src="web_ui/static/img/trackers/reelflix.png" width="16" height="16" />               | ReelFLiX               | REELFLIX               | MOVIE                        |
 | <img src="web_ui/static/img/trackers/retroflix.png" width="16" height="16" />              | RetroFlix              | RETROFLIX              | MOVIE, TV                    |
+| <img src="web_ui/static/img/trackers/retromoviesclub.png" width="16" height="16" />        | RetroMoviesClub        | RETROMOVIESCLUB        | MOVIE                        |
 | <img src="web_ui/static/img/trackers/samaritano.png" width="16" height="16" />             | Samaritano             | SAMARITANO             | MOVIE, TV, BOOK, GAME        |
 | <img src="web_ui/static/img/trackers/seedpool.png" width="16" height="16" />               | seedpool               | SEEDPOOL               | MOVIE, TV, BOOK, GAME, MUSIC |
 | <img src="web_ui/static/img/trackers/shareisland.png" width="16" height="16" />            | ShareIsland            | SHAREISLAND            | MOVIE, TV                    |
@@ -200,7 +214,7 @@ For a manual Linux/macOS/Windows installation, Upload Assistant needs a few tool
      - Debian/Ubuntu: `sudo apt install mediainfo ffmpeg`
      - Arch Linux: `sudo pacman -S mediainfo ffmpeg`
      - RedHat/Fedora: `sudo dnf install mediainfo ffmpeg`
-   - _Having issues with FFmpeg? Check out our [FFmpeg troubleshooting guide](docs/ffmpeg---max-workers-issues.md)._
+   - _Having issues with FFmpeg? Check out our [FFmpeg troubleshooting guide](docs/ffmpeg-max-workers-issues.md)._
 
 ---
 
@@ -217,6 +231,7 @@ Using Git is the recommended method because it makes updating the assistant in t
    - **macOS:** Install it via Homebrew or Xcode Command Line Tools.
 2. **Clone the project**:
    Open your command prompt or terminal, navigate to the folder where you want to keep the assistant, and run:
+
    ```bash
    git clone https://github.com/wastaken7/Upload-Assistant.git
    cd Upload-Assistant
@@ -245,6 +260,7 @@ pip3 install --user -U -r requirements.txt
 > This means your system prefers keeping Python packages separated. You can set up a "Virtual Environment" (a private workspace for this tool) by running:
 >
 > - **Linux / macOS:**
+>
 >   ```bash
 >   python3 -m venv venv
 >   source venv/bin/activate
@@ -267,6 +283,7 @@ In your terminal, run the command for your operating system and follow the on-sc
 
 - **Windows:** Install with the [`.exe` installer](docs/windows-install.md), then run `ua-config` in a new terminal.
 - **Linux / macOS:**
+
   ```bash
   python3 config-generator.py
   ```
@@ -283,18 +300,20 @@ In your terminal, run the command for your operating system and follow the on-sc
 
 **Additional Resources:**
 
-- Check out our [Wiki Help Page](docs/Home.md).
+- Check out our [Wiki Help Page](docs/home.md).
 - Windows installation and basic commands: see [Windows Install](docs/windows-install.md).
 - Need a no-root Linux or seedbox setup? See [Seedbox / Linux Install](docs/seedbox.md).
-- Feel free to contact me if you need help, I'm not that hard to find.
+- Found an issue or need help? Please [open a GitHub Issue](https://github.com/wastaken7/Upload-Assistant/issues) so we can track and resolve it.
 
 ## **Updating:**
 
 - To update a Git installation, navigate into the Upload-Assistant directory and pull the latest changes:
+
   ```bash
   cd Upload-Assistant
   git pull
   ```
+
 - Or, if you downloaded the ZIP file, download a fresh ZIP from GitHub and overwrite your existing files.
 - For the Windows installation, run `ua-update`.
 - Run the command to update dependencies:
@@ -308,15 +327,18 @@ In your terminal, run the command for your operating system and follow the on-sc
 To run the assistant, use the command for your system:
 
 - **Windows:**
+
   ```cmd
   ua "C:\path\to\content" --args
   ```
+
 - **Linux / macOS:**
+
   ```bash
   python3 upload.py "/path/to/content" --args
   ```
 
-Args are OPTIONAL and ALWAYS follow the path. For a list of all available arguments, pass `--help`.
+Arguments are optional and normally follow the path. Input modes such as `--paths-from-stdin` may omit the positional path. For a list of all available arguments, pass `--help`.
 The file/folder path works best enclosed in double quotes.
 
 - CLI arguments: [docs/cli-args.md](docs/cli-args.md)
@@ -324,11 +346,11 @@ The file/folder path works best enclosed in double quotes.
 
 ## **Docker Usage:**
 
-Visit our wonderful [docker usage](docs/docker-wiki-full.md)
+Visit our wonderful [docker usage](docs/docker.md)
 
 Also see this excellent video put together by a community member <https://videos.badkitty.zone/ua>
 
-Web UI setup (Docker GUI / Unraid): [docs/docker-gui-wiki-full.md](docs/docker-gui-wiki-full.md)
+Web UI setup (Docker GUI / Unraid): [docs/docker-gui.md](docs/docker-gui.md)
 Web UI docs: [docs/web-ui.md](docs/web-ui.md)
 
 ## **Attributions:**

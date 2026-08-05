@@ -22,7 +22,7 @@ from langcodes import tag_parser
 from torf import Torrent
 
 from src.bbcode import BBCODE
-from src.console import console, logger
+from src.console import buffer_console_logs, console, logger
 from src.exportmi import export_info
 from src.languages import languages_manager
 from src.meta import Meta
@@ -30,6 +30,45 @@ from src.usenetcreate import verify_nzb_has_password
 
 
 class Common:
+    PORTUGUESE_SUBTITLE_EXTENSIONS: frozenset[str] = frozenset({".ass", ".ssa", ".srt", ".sub", ".vtt"})
+    PORTUGUESE_SUBTITLE_WORDS: frozenset[str] = frozenset(
+        {
+            "agora",
+            "aqui",
+            "bem",
+            "como",
+            "com",
+            "entao",
+            "essa",
+            "esse",
+            "esta",
+            "estao",
+            "isso",
+            "muito",
+            "nao",
+            "obrigada",
+            "obrigado",
+            "onde",
+            "para",
+            "porque",
+            "posso",
+            "pode",
+            "quando",
+            "que",
+            "senhor",
+            "senhora",
+            "sua",
+            "suas",
+            "seu",
+            "seus",
+            "tambem",
+            "tenho",
+            "temos",
+            "uma",
+            "voce",
+            "vamos",
+        }
+    )
     LANGUAGE_EQUIVALENCE_GROUPS: tuple[set[str], ...] = (
         {"chinese", "mandarin", "zh", "zho", "chi", "cmn", "chinese simplified", "chinese traditional", "zh hans", "zh hant"},
         {"english", "eng", "en", "en us", "en gb", "english cc", "english sdh", "english forced"},
@@ -109,6 +148,69 @@ class Common:
         for value in values:
             expanded.update(self._expand_language_candidates(value, alias_lookup))
         return expanded
+
+    @staticmethod
+    def _read_subtitle_text(path: Path) -> str:
+        for encoding in ("utf-8-sig", "utf-16", "cp1252"):
+            try:
+                return path.read_text(encoding=encoding)
+            except UnicodeError:
+                continue
+            except OSError:
+                return ""
+        return ""
+
+    async def has_portuguese_external_subtitle(self, meta: Meta) -> bool:
+        """Check external subtitle filenames and textual content for Portuguese."""
+        aliases = {
+            "brazilian",
+            "brazilian portuguese",
+            "por",
+            "portuguese",
+            "portugues",
+            "pt",
+            "pt br",
+            "ptbr",
+            "pt brasil",
+        }
+        normalized_aliases = {self._normalize_language_token(alias) for alias in aliases}
+        text_paths: list[Path] = []
+
+        for subtitle_file in meta.subtitle_files or []:
+            path = Path(str(subtitle_file))
+            filename = self._normalize_language_token(path.stem)
+            filename_tokens = filename.split()
+            while filename_tokens and filename_tokens[-1] in {"forced", "sdh"}:
+                filename_tokens.pop()
+            filename_without_flags = " ".join(filename_tokens)
+            if any(filename_without_flags == alias or filename_without_flags.endswith(f" {alias}") for alias in normalized_aliases):
+                return True
+            if path.suffix.casefold() in self.PORTUGUESE_SUBTITLE_EXTENSIONS:
+                text_paths.append(path)
+
+        for path in text_paths:
+            text = await asyncio.to_thread(self._read_subtitle_text, path)
+            words = set(re.findall(r"[a-z]+", self._normalize_language_token(text)))
+            if len(words & self.PORTUGUESE_SUBTITLE_WORDS) >= 3:
+                return True
+
+        return False
+
+    async def check_portuguese_video_requirements(self, meta: Meta, tracker: str) -> bool:
+        if await self.has_portuguese_external_subtitle(meta):
+            return True
+
+        subtitles = await self.check_language_requirements(
+            meta,
+            tracker,
+            languages_to_check=["portuguese", "português", "por", "pt", "pt-br", "pt br", "brazilian portuguese"],
+            check_audio=True,
+            check_subtitle=True,
+            prompt_on_failure=False,
+        )
+        if not subtitles and (not meta.unattended or meta.unattended_confirm):
+            return await self.prompt_user_for_confirmation(f"{tracker}: No Portuguese audio or subtitles found. Do you want to proceed with the upload?")
+        return subtitles
 
     def _format_language_for_display(self, language: str) -> str:
         if not language:
@@ -2440,7 +2542,8 @@ class Common:
             logger.info(f"Filename: {filename}")  # Ensure filename is printed if available
 
         if not meta.unattended:
-            selection = (await asyncio.to_thread(input, f"Do you want to use these IDs from {tracker_name}? (Y/n): ")).strip().lower()
+            async with buffer_console_logs():
+                selection = (await asyncio.to_thread(input, f"Do you want to use these IDs from {tracker_name}? (Y/n): ")).strip().lower()
             try:
                 return selection == "" or selection == "y" or selection == "yes"
             except KeyboardInterrupt, EOFError:
@@ -2448,8 +2551,11 @@ class Common:
         else:
             return True
 
-    async def prompt_user_for_confirmation(self, message: str) -> bool:
-        response = (await asyncio.to_thread(input, f"{message} (Y/n): ")).strip().lower()
+    async def prompt_user_for_confirmation(self, message: str, meta: Meta | None = None) -> bool:
+        if meta and meta.unattended and not meta.unattended_confirm:
+            return False
+        async with buffer_console_logs():
+            response = (await asyncio.to_thread(input, f"{message} (Y/n): ")).strip().lower()
         return response == "" or response == "y"
 
     async def _apply_region_distributor(self, meta: Meta, attributes: dict[str, Any]) -> None:
@@ -2633,11 +2739,14 @@ class Common:
                     sys.exit(1)
 
             if description:
+                raw_descriptions = getattr(meta, "tracker_description_raw", {}) or {}
+                raw_descriptions[tracker] = description
+                meta.tracker_description_raw = raw_descriptions
                 bbcode = BBCODE()
                 description, imagelist = bbcode.clean_unit3d_description(description, torrent_url)
                 if not skip_tracker_descriptions:
                     logger.info(f"[green]Successfully grabbed description from {tracker}")
-                    logger.info(f"Extracted description: {description}", extra={"markup": False})
+                    logger.info(f"Extracted description: \n\n{description}\n\n", extra={"markup": False, "highlighter": None})
 
                     from src.trackersetup import api_trackers
 
@@ -2723,10 +2832,16 @@ class Common:
                             raise KeyError("No data in response")
                     except KeyError, IndexError, TypeError:
                         logger.info("[red]Unable to get data from ptgen using IMDb")
-                        params["url"] = console.input("[red]Please enter [yellow]Douban[/yellow] link: ")
+                        if not meta.unattended or (meta.unattended and meta.unattended_confirm):
+                            params["url"] = console.input("[red]Please enter [yellow]Douban[/yellow] link: ")
+                        else:
+                            params["url"] = ""
                 else:
                     logger.info("[red]No IMDb id was found.")
-                    params["url"] = console.input("[red]Please enter [yellow]Douban[/yellow] link: ")
+                    if not meta.unattended or (meta.unattended and meta.unattended_confirm):
+                        params["url"] = console.input("[red]Please enter [yellow]Douban[/yellow] link: ")
+                    else:
+                        params["url"] = ""
 
                 # Fetch with douban URL
                 ptgen_json = await fetch_ptgen(client, url, params)
@@ -2747,7 +2862,7 @@ class Common:
                 ptgen_text = ptgen_json.get("format", "")
                 if "[/img]" in ptgen_text:
                     ptgen_text = ptgen_text.split("[/img]")[1]
-                ptgen_text = f"[img]{meta.imdb_info.get('cover', meta.cover)}[/img]{ptgen_text}"
+                ptgen_text = f"[img]{meta.imdb_info.get('cover', meta.artwork_url)}[/img]{ptgen_text}"
 
         except Exception:
             console.print_exception()
@@ -2967,6 +3082,7 @@ class Common:
         require_both: bool = False,
         original_language: bool = False,
         original_required: bool = False,
+        prompt_on_failure: bool = True,
     ) -> bool:
         """
         Check if the media metadata meets specific language requirements for audio and/or subtitles.
@@ -2993,6 +3109,8 @@ class Common:
         :type original_language: bool
         :param original_required: If True, the original language must be present in the audio tracks.
         :type original_required: bool
+        :param prompt_on_failure: If True, ask whether to continue when the requirement is not met.
+        :type prompt_on_failure: bool
         :return: True if the media meets the specified language requirements, False otherwise.
         :rtype: bool
         """
@@ -3012,6 +3130,11 @@ class Common:
                         f"[yellow]Required one of:[/yellow] {', '.join(languages_to_check)}\n"
                         f"[cyan]Found book language:[/cyan] {book_language}"
                     )
+                    if prompt_on_failure:
+                        return await self.prompt_user_for_confirmation(
+                            f"{tracker}: Language requirements not met. Do you want to proceed with the upload?",
+                            meta,
+                        )
                 return meets_requirement
             return True
 
@@ -3054,7 +3177,12 @@ class Common:
                     f"[yellow]Required original audio language:[/yellow] {language_display}\n"
                     f"[cyan]Found Audio Languages:[/cyan] {', '.join(audio_languages) or 'None'}"
                 )
-                return not meta.unattended and cli_ui.ask_yes_no("Do you want to upload anyway?", default=False)
+                if prompt_on_failure:
+                    return await self.prompt_user_for_confirmation(
+                        f"{tracker}: Language requirements not met. Do you want to proceed with the upload?",
+                        meta,
+                    )
+                return False
 
             audio_ok = not check_audio or any(lang in audio_languages for lang in languages_to_check)
             subtitle_ok = not check_subtitle or any(lang in subtitle_languages for lang in languages_to_check)
@@ -3077,8 +3205,13 @@ class Common:
                 )
                 return False
 
+            if not check_audio and not check_subtitle:
+                return True
+
+            meets_requirement = audio_ok and subtitle_ok if require_both else (check_audio and audio_ok) or (check_subtitle and subtitle_ok)
+
             if require_both:
-                if not (audio_ok and subtitle_ok):
+                if not meets_requirement:
                     logger.info(
                         f"[red]Language requirement not met for [bold]{tracker}[/bold].[/red]\n"
                         f"[yellow]Required both audio and subtitles in one of the following:[/yellow] "
@@ -3087,7 +3220,7 @@ class Common:
                         f"[cyan]Found Subtitles:[/cyan] {', '.join(subtitle_languages) or 'None'}"
                     )
             else:
-                if not (audio_ok or subtitle_ok):
+                if not meets_requirement:
                     logger.info(
                         f"[red]Language requirement not met for [bold]{tracker}[/bold].[/red]\n"
                         f"[yellow]Required at least one of the following:[/yellow] "
@@ -3096,9 +3229,12 @@ class Common:
                         f"[cyan]Found Subtitles:[/cyan] {', '.join(subtitle_languages) or 'None'}"
                     )
 
-            if require_both:
-                return audio_ok and subtitle_ok
-            return audio_ok or subtitle_ok
+            if not meets_requirement and prompt_on_failure:
+                return await self.prompt_user_for_confirmation(
+                    f"{tracker}: Language requirements not met. Do you want to proceed with the upload?",
+                    meta,
+                )
+            return meets_requirement
 
         except Exception as e:
             console.print_exception()
