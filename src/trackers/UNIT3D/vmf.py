@@ -3,7 +3,6 @@ import re
 import unicodedata
 from typing import Any, cast
 
-from src.console import logger
 from src.meta import Meta
 from src.trackers.UNIT3D import UNIT3D
 
@@ -228,30 +227,6 @@ class VietMediaF(UNIT3D):
 
     async def get_tmdb(self, meta: Meta) -> dict[str, str]:
         return {"tmdb": str(self._resolve_tmdb_id(meta))}
-
-    async def get_additional_checks(self, meta: Meta) -> bool:
-        tmdb_id = self._resolve_tmdb_id(meta)
-        if tmdb_id <= 0:
-            logger.info(f"{self.tracker}: [bold red]A valid TMDB ID is required, skipping {self.tracker} upload.[/bold red]")
-            return False
-
-        if meta.category not in await self.get_category_id(meta, mapping_only=True):
-            logger.info(f"{self.tracker}: [bold red]Unsupported category {meta.category!r}, skipping {self.tracker} upload.[/bold red]")
-            return False
-        if (meta.type or "") not in await self.get_type_id(meta, mapping_only=True):
-            logger.info(f"{self.tracker}: [bold red]Unsupported type {meta.type!r}, skipping {self.tracker} upload.[/bold red]")
-            return False
-        if meta.resolution not in await self.get_resolution_id(meta, mapping_only=True):
-            logger.info(f"{self.tracker}: [bold red]Unsupported resolution {meta.resolution!r}, skipping {self.tracker} upload.[/bold red]")
-            return False
-        if meta.category == "TV" and (meta.season_int <= 0 or (meta.episode_int <= 0 and not meta.tv_pack)):
-            logger.info(f"{self.tracker}: [bold red]Canonical TV season/episode metadata is required, skipping {self.tracker} upload.[/bold red]")
-            return False
-        if not meta.mediainfo and not meta.bdinfo:
-            logger.info(f"{self.tracker}: [bold red]MediaInfo or BDInfo is required, skipping {self.tracker} upload.[/bold red]")
-            return False
-
-        return True
 
     async def get_additional_data(self, meta: Meta) -> dict[str, str]:
         return {"mod_queue_opt_in": await self.get_flag(meta, "modq")}

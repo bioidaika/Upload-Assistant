@@ -174,15 +174,9 @@ def test_vmf_name_leaves_non_vietnamese_release_unchanged():
     assert vmf_name(name, audio_languages=["English"], mediainfo=mediainfo_audio(Title="English")) == name
 
 
-@pytest.mark.parametrize("tmdb", [None, 0, "0", "invalid"])
-def test_vmf_checks_require_valid_tmdb(tmdb: object):
-    assert asyncio.run(tracker().get_additional_checks(valid_meta(tmdb=tmdb))) is False
-
-
-def test_vmf_checks_accept_tmdb_id_fallback():
+def test_vmf_uses_tmdb_id_fallback():
     meta = valid_meta(tmdb="invalid", tmdb_id=123)
 
-    assert asyncio.run(tracker().get_additional_checks(meta)) is True
     assert asyncio.run(tracker().get_tmdb(meta)) == {"tmdb": "123"}
 
 
@@ -197,40 +191,24 @@ def test_vmf_dupe_search_uses_same_tmdb_fallback_as_upload_payload():
 
 
 @pytest.mark.parametrize(
-    ("field", "value"),
-    [("category", "MUSIC"), ("type", "UNKNOWN"), ("resolution", "360p")],
+    "overrides",
+    [
+        {"tmdb": None, "tmdb_id": None},
+        {"category": "MUSIC"},
+        {"type": "UNKNOWN"},
+        {"resolution": "OTHER"},
+        {"mediainfo": {}, "bdinfo": {}},
+        {"category": "TV", "season_int": 0, "episode_int": 0, "tv_pack": False},
+    ],
 )
-def test_vmf_checks_reject_unmapped_unit3d_taxonomy(field: str, value: str):
-    assert asyncio.run(tracker().get_additional_checks(valid_meta(**{field: value}))) is False
+def test_vmf_does_not_add_stricter_pre_upload_checks(overrides: dict[str, object]):
+    assert asyncio.run(tracker().get_additional_checks(valid_meta(**overrides))) is True
 
 
-def test_vmf_checks_require_mediainfo_or_bdinfo():
-    assert asyncio.run(tracker().get_additional_checks(valid_meta(mediainfo={}, bdinfo={}))) is False
-    assert asyncio.run(tracker().get_additional_checks(valid_meta(mediainfo={}, bdinfo={"title": "Example"}))) is True
+def test_vmf_uses_unit3d_other_resolution_fallback():
+    meta = valid_meta(resolution="OTHER")
 
-
-def test_vmf_checks_accept_valid_tv_episode_and_season_pack():
-    episode = valid_meta(category="TV", season_int=1, episode_int=2, tv_pack=False)
-    season_pack = valid_meta(category="TV", season_int=1, episode_int=0, tv_pack=True)
-
-    assert asyncio.run(tracker().get_additional_checks(episode)) is True
-    assert asyncio.run(tracker().get_additional_checks(season_pack)) is True
-
-
-@pytest.mark.parametrize(
-    ("season_int", "episode_int", "tv_pack"),
-    [(0, 1, False), (1, 0, False), (0, 0, True)],
-)
-def test_vmf_checks_reject_incomplete_tv_metadata(season_int: int, episode_int: int, tv_pack: bool):
-    meta = valid_meta(category="TV", season_int=season_int, episode_int=episode_int, tv_pack=tv_pack)
-
-    assert asyncio.run(tracker().get_additional_checks(meta)) is False
-
-
-def test_vmf_checks_allow_mediainfo_without_encode_settings():
-    meta = valid_meta(valid_mi_settings=False, has_encode_settings=False)
-
-    assert asyncio.run(tracker().get_additional_checks(meta)) is True
+    assert asyncio.run(tracker().get_resolution_id(meta)) == {"resolution_id": "10"}
 
 
 def test_vmf_mod_queue_payload_honors_config_and_meta_override():
