@@ -3,7 +3,7 @@ import contextlib
 import json
 import platform
 import re
-from collections.abc import MutableMapping, Sequence
+from collections.abc import Mapping, MutableMapping, Sequence
 from pathlib import Path
 from typing import Any, cast
 
@@ -12,6 +12,7 @@ from pymediainfo import MediaInfo
 
 from src.console import logger
 from src.meta import Meta
+from src.takescreens import screenshot_par_scale_factors, should_scale_screenshots_for_par
 from src.temp_paths import menu_screenshots_dir
 from src.uploadscreens import UploadScreensManager
 
@@ -37,6 +38,14 @@ def select_evenly_spaced(items: list[Any], num_to_select: int) -> list[Any]:
         unique_indices.sort()
 
     return [items[idx] for idx in unique_indices]
+
+
+def discard_previous_menu_capture_files(image_pattern: Path) -> None:
+    """Remove only prior output for the menu VOB about to be captured."""
+    glob_name = image_pattern.name.replace("%03d", "*")
+    for image_path in image_pattern.parent.glob(glob_name):
+        with contextlib.suppress(OSError):
+            image_path.unlink()
 
 
 class DiscMenus:
@@ -84,6 +93,8 @@ class DiscMenus:
             max_menu_screens = int(default_section.get("max_menu_screens", 6))
         except ValueError, TypeError:
             max_menu_screens = 6
+        screenshot_config = cast(Mapping[str, Any], default_section) if isinstance(default_section, Mapping) else {}
+        scale_for_par = should_scale_screenshots_for_par(screenshot_config)
 
         captured_images = []
         output_dir = menu_screenshots_dir(meta.base_dir, meta.uuid)
@@ -157,18 +168,7 @@ class DiscMenus:
                     logger.error(f"[red]Error parsing MediaInfo for {file}: {e}[/red]")
                     width, height, par, dar, duration_ms = 720, 480, 1.0, 1.3333, None
 
-                # Calculate DAR-corrected resolution (following takescreens.py logic)
-                w_sar = 1.0
-                h_sar = 1.0
-                if par < 1:
-                    new_height = dar * height
-                    sar = width / new_height
-                    w_sar = 1.0
-                    h_sar = sar
-                else:
-                    sar = par
-                    w_sar = sar
-                    h_sar = 1.0
+                w_sar, h_sar = screenshot_par_scale_factors(width, height, par, dar, scale_for_par)
 
                 # Determine duration
                 duration_sec = 0.0
@@ -192,6 +192,7 @@ class DiscMenus:
                 sanitized_disc_name = re.sub(r'[<>:"/\\|?*]', "_", disc.get("name", "dvd"))
                 vob_base = Path(file).stem
                 image_pattern = Path(output_dir) / f"{sanitized_disc_name}-{vob_base}-%03d.png"
+                discard_previous_menu_capture_files(image_pattern)
 
                 # Run ffmpeg
                 if duration_sec < 2.0:
@@ -220,7 +221,10 @@ class DiscMenus:
 
                     # Gather generated screenshots
                     glob_pattern = Path(output_dir) / f"{sanitized_disc_name}-{vob_base}-*.png"
-                    found_images = sorted(str(p) for p in glob_pattern.parent.glob(glob_pattern.name))
+                    found_images = sorted(str(p) for p in glob_pattern.parent.glob(glob_pattern.name)) if process.returncode == 0 else []
+                    if process.returncode != 0:
+                        logger.error(f"[red]FFmpeg failed processing {file}: {_stderr.decode(errors='replace')}[/red]")
+                        discard_previous_menu_capture_files(image_pattern)
 
                     # Filter out blank/black frames
                     valid_images = []
@@ -258,16 +262,20 @@ class DiscMenus:
                             str(image_pattern),
                         ]
                         logger.debug(f"Fallback FFmpeg command: {' '.join(cmd_fallback)}")
+                        discard_previous_menu_capture_files(image_pattern)
                         process_fallback = await asyncio.create_subprocess_exec(*cmd_fallback, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
                         try:
-                            await asyncio.wait_for(process_fallback.communicate(), timeout=30.0)
+                            _fallback_stdout, fallback_stderr = await asyncio.wait_for(process_fallback.communicate(), timeout=30.0)
                         except TimeoutError:
                             with contextlib.suppress(Exception):
                                 process_fallback.kill()
-                            await process_fallback.communicate()
+                            _fallback_stdout, fallback_stderr = await process_fallback.communicate()
                             logger.error(f"[red]FFmpeg fallback timed out processing {file}[/red]")
 
-                        found_images = sorted(str(p) for p in glob_pattern.parent.glob(glob_pattern.name))
+                        found_images = sorted(str(p) for p in glob_pattern.parent.glob(glob_pattern.name)) if process_fallback.returncode == 0 else []
+                        if process_fallback.returncode != 0:
+                            logger.error(f"[red]FFmpeg fallback failed processing {file}: {fallback_stderr.decode(errors='replace')}[/red]")
+                            discard_previous_menu_capture_files(image_pattern)
                         valid_images = []
                         for img_path in found_images:
                             try:

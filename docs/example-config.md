@@ -24,7 +24,7 @@ The config is a Python dict named `config` with these top-level sections:
 Notes:
 
 - Many numeric values are stored as strings (e.g. `"4"`, `"14000"`). Keep the same type unless you know a specific option is numeric.
-- Tracker lists are usually a comma-separated string using tracker identifiers (e.g. `"MORETHANTV, BEYONDHD"`).
+- Tracker lists are usually a comma-separated string using tracker identifiers (e.g. `"BEYONDHD, AITHER"`).
 
 ## How Upload Assistant uses this config (implementation context)
 
@@ -105,6 +105,7 @@ Implementation notes:
 - `screens_per_row` (str): Screenshots per row in description (only for some trackers).
 - `frame_overlay` (bool): Overlay frame number/type and “Tonemapped” (if applicable) on screenshots.
 - `overlay_text_size` (str): Overlay text size (scales with resolution).
+- `scale_screenshots_for_par` (bool): When `False` (the default), preserve MediaInfo's coded dimensions. Set to `True` only to apply pixel-aspect-ratio correction for non-square-pixel sources; this can change a PNG from `1920x1040` to `1924x1040`.
 
 Implementation notes:
 
@@ -134,6 +135,9 @@ Implementation notes:
 - `process_limit` (str): Max number of screenshot optimization processes.
 - `threads` (str): Thread limit per process during image optimization.
 - `ffmpeg_limit` (bool): Limit CPU usage when running ffmpeg.
+- `add_dynamic_hdr_plot` (bool): Generate and add Dolby Vision/HDR10+ metadata plots when dynamic metadata is detected. The required tools download automatically on first use. Extraction reads each selected video file in full and can take a while for large releases.
+- `dynamic_hdr_plot_header` (str): BBCode header used above dynamic HDR plots.
+- `dynamic_hdr_plot_max_files` (int): Maximum video files to plot for a multi-file release (default: `1`).
 
 Implementation notes:
 
@@ -277,7 +281,7 @@ A comma-separated list of tracker identifiers to upload to by default.
 Example:
 
 ```python
-"default_trackers": "MORETHANTV, BEYONDHD, AITHER"
+"default_trackers": "BEYONDHD, AITHER"
 ```
 
 ### Per-tracker blocks
