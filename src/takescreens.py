@@ -2,7 +2,6 @@
 import asyncio
 import contextlib
 import gc
-import glob
 import json
 import os
 import platform
@@ -41,11 +40,41 @@ ffmpeg_is_good = False
 use_libplacebo = True
 tone_map = False
 ffmpeg_compression = "6"
+LOSTIMG_MIN_SIZE = 75_000
+LOSTIMG_MAX_SIZE = 20_000_000
+
+
+def is_valid_lostimg_image_size(image_size: int) -> bool:
+    """Return whether an image meets Lostimg's accepted size range."""
+    return LOSTIMG_MIN_SIZE < image_size <= LOSTIMG_MAX_SIZE
 
 
 def compile_ffmpeg_command(command: Any) -> list[str]:
     """Compile an ffmpeg-python command into subprocess-safe string arguments."""
     return [str(argument) for argument in command.compile()]
+
+
+def get_ffmpeg_output_path(command: Any, cmd_list: list[str]) -> str:
+    """Return ffmpeg-python's output filename without relying on argument order."""
+    nodes = [getattr(command, "node", None)]
+    visited: set[int] = set()
+
+    while nodes:
+        node = nodes.pop()
+        if node is None or id(node) in visited:
+            continue
+        visited.add(id(node))
+
+        kwargs = getattr(node, "kwargs", {})
+        filename = kwargs.get("filename") if isinstance(kwargs, dict) else None
+        if filename is not None:
+            return str(filename)
+
+        incoming_edges = getattr(node, "incoming_edges", ())
+        nodes.extend(edge.upstream_node for edge in incoming_edges if getattr(edge, "upstream_node", None) is not None)
+
+    # Keep compatibility with lightweight command doubles used by callers.
+    return cmd_list[-1] if cmd_list else ""
 
 
 algorithm = "mobius"
@@ -82,6 +111,29 @@ def _apply_config(config: Mapping[str, Any]) -> None:
         desat = 10.0
 
 
+def discard_smallest_capture_result(capture_results: list[str]) -> str | None:
+    """Delete and remove the smallest image produced by this capture batch."""
+    smallest: str | None = None
+    smallest_size = float("inf")
+    for image in capture_results:
+        try:
+            image_size = Path(image).stat().st_size
+        except FileNotFoundError:
+            logger.info(f"[red]File not found: {image}[/red]")
+            continue
+        if image_size < smallest_size:
+            smallest = image
+            smallest_size = image_size
+
+    if smallest is None:
+        return None
+
+    logger.debug(f"[yellow]Removing smallest image: {smallest} ({smallest_size} bytes)[/yellow]")
+    Path(smallest).unlink()
+    capture_results.remove(smallest)
+    return smallest
+
+
 async def run_ffmpeg(command: Any) -> tuple[int | None, bytes, bytes]:
     cmd_list = compile_ffmpeg_command(command)
     process_env = os.environ.copy()
@@ -89,7 +141,7 @@ async def run_ffmpeg(command: Any) -> tuple[int | None, bytes, bytes]:
     # FFREPORT defaults to a timestamped file in the current working
     # directory.  Keep each report beside its output, with a unique name so
     # concurrent or repeated runs do not overwrite an earlier report.
-    output_path = cmd_list[-1] if cmd_list else ""
+    output_path = get_ffmpeg_output_path(command, cmd_list)
     if output_path and output_path not in {"-", "pipe:"} and not output_path.startswith("pipe:"):
         report_path = Path(output_path).resolve().parent / f"ffmpeg-{uuid.uuid4().hex}.log"
         report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -151,6 +203,47 @@ def round_to_even(value: float) -> int:
     if rounded % 2 != 0:
         rounded += 1
     return rounded
+
+
+def _as_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "off"}:
+            return False
+    return default
+
+
+def should_scale_screenshots_for_par(config: Mapping[str, Any] | None = None) -> bool:
+    """Return whether screenshots should be converted to square-pixel dimensions."""
+    settings = default_config if config is None else config
+    return _as_bool(settings.get("scale_screenshots_for_par"), default=False)
+
+
+def screenshot_par_scale_factors(
+    width: float,
+    height: float,
+    pixel_aspect_ratio: float,
+    display_aspect_ratio: float,
+    apply_par_scaling: bool | None = None,
+) -> tuple[float, float]:
+    """Return the width and height scale factors for a screenshot.
+
+    Screenshots retain their MediaInfo-reported coded dimensions by default.
+    PAR correction remains available for non-square-pixel sources when a user
+    explicitly enables ``scale_screenshots_for_par``.
+    """
+    if apply_par_scaling is None:
+        apply_par_scaling = should_scale_screenshots_for_par()
+    if not apply_par_scaling or pixel_aspect_ratio == 1:
+        return 1.0, 1.0
+    if pixel_aspect_ratio < 1:
+        new_height = display_aspect_ratio * height
+        return 1.0, width / new_height
+    return pixel_aspect_ratio, 1.0
 
 
 async def disc_screenshots(
@@ -265,7 +358,14 @@ async def disc_screenshots(
 
         before = {path.resolve() for path in screenshot_dir.glob("*.png")}
         vs_screengn(source=file_path, encode=None, num=num_screens, dir=f"{screenshot_dir}/")
-        valid_results = [str(path) for path in screenshot_dir.glob("*.png") if path.resolve() not in before]
+        for image_path in screenshot_dir.glob("*.png"):
+            if image_path.resolve() in before:
+                continue
+            image_size = image_path.stat().st_size
+            if img_host == "lostimg" and not is_valid_lostimg_image_size(image_size):
+                logger.info(f"[red]Image {image_path} with size {image_size} bytes: does not meet size requirements for {img_host}, skipping.[/red]")
+                continue
+            valid_results.append(str(image_path))
     else:
         loglevel = "verbose" if ffdebug else "quiet"
 
@@ -341,6 +441,12 @@ async def disc_screenshots(
                     else:
                         logger.info(f"[red]Image {image_path} with size {image_size} bytes: does not meet size requirements for {img_host}, retaking.")
                         retake = True
+                elif img_host == "lostimg":
+                    if is_valid_lostimg_image_size(image_size):
+                        logger.debug(f"[green]Image {image_path} meets size requirements for {img_host}.[/green]")
+                    else:
+                        logger.info(f"[red]Image {image_path} with size {image_size} bytes: does not meet size requirements for {img_host}, retaking.")
+                        retake = True
                 elif img_host and img_host in ["lensdump", "ptscreens", "onlyimage", "dalexni", "zipline", "midnightscene", "passtheimage", "seedpool_cdn", "sharex", "utppm"]:
                     logger.debug(f"[green]Image {image_path} meets size requirements for {img_host}.[/green]")
                 else:
@@ -367,6 +473,10 @@ async def disc_screenshots(
                                 valid_image = True
                         elif img_host and img_host in ["imgbox", "pixhost"]:
                             if new_size > 75000 and new_size <= 10000000:
+                                logger.info(f"[green]Successfully retaken screenshot for: {image_path} ({new_size} bytes)[/green]")
+                                valid_image = True
+                        elif img_host == "lostimg":
+                            if is_valid_lostimg_image_size(new_size):
                                 logger.info(f"[green]Successfully retaken screenshot for: {image_path} ({new_size} bytes)[/green]")
                                 valid_image = True
                         elif (
@@ -533,7 +643,6 @@ async def dvd_screenshots(
         return
 
     ifo_mi = MediaInfo.parse(f"{meta.discs[disc_num]['path']}/VTS_{meta.discs[disc_num]['main_set'][0][:2]}_0.IFO", mediainfo_options={"inform_version": "1"})
-    sar = 1.0
     w_sar = 1.0
     h_sar = 1.0
     par: float = 1.0
@@ -556,17 +665,9 @@ async def dvd_screenshots(
             width = float(track.width)
             height = float(track.height)
             frame_rate = float(track.frame_rate)
-    if par < 1:
-        new_height: float = dar * height
-        sar = width / new_height
-        w_sar = 1.0
-        h_sar = sar
-    else:
-        sar = par
-        w_sar = sar
-        h_sar = 1.0
+    w_sar, h_sar = screenshot_par_scale_factors(width, height, par, dar)
 
-    async def _is_vob_good(n: int, loops: int, _num_screens: int) -> tuple[float, float]:
+    async def _is_vob_good(n: int, loops: int, _num_screens: int) -> tuple[float, int]:
         max_loops = 6
         fallback_duration = 300
         valid_tracks: list[dict[str, Any]] = []
@@ -595,10 +696,11 @@ async def dvd_screenshots(
             n = (n + 1) % len(main_set)
             loops += 1
 
-        return fallback_duration, 0.0
+        return fallback_duration, 0
 
     main_set = meta.discs[disc_num]["main_set"][1:] if len(meta.discs[disc_num]["main_set"]) > 1 else meta.discs[disc_num]["main_set"]
-    voblength, _vob_index = await _is_vob_good(0, 0, num_screens)
+    voblength, vob_index = await _is_vob_good(0, 0, num_screens)
+    capture_vob = main_set[vob_index]
     ss_times = await valid_ss_time([], num_screens, voblength, frame_rate, meta, retake=retry_cap)
     capture_tasks: list[Awaitable[tuple[int, str | None]]] = []
     existing_images_count = 0
@@ -606,7 +708,7 @@ async def dvd_screenshots(
 
     for i in range(num_screens + 1):
         image = str(screenshot_dir / f"{sanitized_disc_name}-{i}.png")
-        input_file = f"{meta.discs[disc_num]['path']}/VTS_{main_set[i % len(main_set)]}"
+        input_file = f"{meta.discs[disc_num]['path']}/VTS_{capture_vob}"
         if Path(image).exists() and not meta.retake:
             existing_images_count += 1
             existing_image_paths.append(image)
@@ -621,7 +723,7 @@ async def dvd_screenshots(
 
     for i in range(num_screens + 1):
         image = str(screenshot_dir / f"{sanitized_disc_name}-{i}.png")
-        input_file = f"{meta.discs[disc_num]['path']}/VTS_{main_set[i % len(main_set)]}"
+        input_file = f"{meta.discs[disc_num]['path']}/VTS_{capture_vob}"
         image_paths.append(image)
         input_files.append(input_file)
 
@@ -663,25 +765,7 @@ async def dvd_screenshots(
     capture_results = [r[1] for r in filtered_results if r[1] is not None]
 
     if capture_results and len(capture_results) > num_screens:
-        smallest = None
-        smallest_size = float("inf")
-        matching_files = [str(p) for p in screenshot_dir.glob(f"{glob.escape(sanitized_disc_name)}-*")]
-        normal_screens = [Path(f).name for f in matching_files if re.match(r"^-\d+\.png$", Path(f).name[len(sanitized_disc_name) :])]
-        for screens in normal_screens:
-            screen_path = screenshot_dir / screens
-            try:
-                screen_size = Path(screen_path).stat().st_size
-                if screen_size < smallest_size:
-                    smallest_size = screen_size
-                    smallest = screen_path
-            except FileNotFoundError:
-                logger.info(f"[red]File not found: {screen_path}[/red]")  # Handle potential edge cases
-                continue
-
-        if smallest:
-            logger.debug(f"[yellow]Removing smallest image: {smallest} ({smallest_size} bytes)[/yellow]")
-            Path(smallest).unlink()
-            capture_results.remove(smallest)
+        discard_smallest_capture_result(capture_results)
 
     valid_results: list[str] = []
     remaining_retakes: list[str] = []
@@ -703,7 +787,7 @@ async def dvd_screenshots(
                 logger.info(f"[yellow]Retaking screenshot for: {image} (Attempt {attempt}/{retry_attempts})[/yellow]")
 
                 index = int(image.rsplit("-", 1)[-1].split(".")[0])
-                input_file = f"{meta.discs[disc_num]['path']}/VTS_{main_set[index % len(main_set)]}"
+                input_file = f"{meta.discs[disc_num]['path']}/VTS_{capture_vob}"
                 adjusted_time = random.uniform(0, voblength)  # nosec B311 - Random screenshot timing, not cryptographic  # noqa: S311
 
                 if Path(image).exists():  # Prevent unnecessary deletion error
@@ -1600,16 +1684,7 @@ async def screenshots(
         dar = safe_float(video_track.get("DisplayAspectRatio"), 16.0 / 9.0, "DisplayAspectRatio")
         frame_rate = safe_float(video_track.get("FrameRate"), 24.0, "FrameRate")
 
-        if par == 1:
-            sar = w_sar = h_sar = 1.0
-        elif par < 1:
-            new_height = dar * height
-            sar = width / new_height
-            w_sar = 1.0
-            h_sar = sar
-        else:
-            sar = w_sar = par
-            h_sar = 1
+        w_sar, h_sar = screenshot_par_scale_factors(width, height, par, dar)
     except Exception as e:
         logger.error(f"[red]Error processing MediaInfo.json: {e}")
         if meta.debug:
@@ -1799,6 +1874,9 @@ async def screenshots(
         retake = False
         image_size = Path(image_path).stat().st_size
         logger.debug(f"[yellow]Checking image {image_path} (size: {image_size} bytes) for image host: {img_host}[/yellow]")
+        if manual_frames and img_host == "lostimg" and not is_valid_lostimg_image_size(image_size):
+            logger.info(f"[red]Image {image_path} with size {image_size} bytes: does not meet size requirements for {img_host}, skipping.[/red]")
+            continue
         if not manual_frames:
             if image_size <= 75000:
                 logger.info(f"[yellow]Image {image_path} is incredibly small, retaking.")
@@ -1812,6 +1890,12 @@ async def screenshots(
                         retake = True
                 elif img_host and img_host in ["imgbox", "pixhost"]:
                     if 75000 < image_size <= 10000000:
+                        logger.debug(f"[green]Image {image_path} meets size requirements for {img_host}.[/green]")
+                    else:
+                        logger.info(f"[red]Image {image_path} with size {image_size} bytes: does not meet size requirements for {img_host}, retaking.")
+                        retake = True
+                elif img_host == "lostimg":
+                    if is_valid_lostimg_image_size(image_size):
                         logger.debug(f"[green]Image {image_path} meets size requirements for {img_host}.[/green]")
                     else:
                         logger.info(f"[red]Image {image_path} with size {image_size} bytes: does not meet size requirements for {img_host}, retaking.")
@@ -1863,6 +1947,10 @@ async def screenshots(
                                 if 75000 < new_size <= 10000000:
                                     logger.info(f"[green]Successfully retaken screenshot for: {screenshot_path} ({new_size} bytes)[/green]")
                                     valid_image = True
+                            elif img_host == "lostimg":
+                                if is_valid_lostimg_image_size(new_size):
+                                    logger.info(f"[green]Successfully retaken screenshot for: {screenshot_path} ({new_size} bytes)[/green]")
+                                    valid_image = True
                             elif (
                                 img_host
                                 and img_host in ["lensdump", "ptscreens", "onlyimage", "dalexni", "zipline", "midnightscene", "passtheimage", "seedpool_cdn", "sharex", "utppm"]
@@ -1904,6 +1992,9 @@ async def screenshots(
                             valid_image = True
                     elif img_host and img_host in ["imgbox", "pixhost"]:
                         if 75000 < new_size <= 10000000:
+                            valid_image = True
+                    elif img_host == "lostimg":
+                        if is_valid_lostimg_image_size(new_size):
                             valid_image = True
                     elif (
                         img_host

@@ -638,6 +638,28 @@ class DescriptionBuilder:
             logger.warning(f"[yellow]Warning: Error getting audio spectrogram section: {e!s}[/yellow]")
         return ""
 
+    async def get_dynamic_hdr_plot_section(self, meta: Meta) -> str:
+        """Return Dolby Vision/HDR10+ dynamic metadata plots, when enabled."""
+        if not (meta.dynamic_hdr_plot or self._get_bool_config("add_dynamic_hdr_plot", False)):
+            return ""
+        plot_images = get_tracker_image_collection(meta, self.tracker, "dynamic_hdr_plot_images")
+        if not plot_images:
+            return ""
+        header = self._get_str_config("dynamic_hdr_plot_header", "[center][b]Dynamic HDR Metadata[/b][/center]")
+        desc_parts: list[str] = [header] if header is not None else []
+        desc_parts.append("\n[center]")
+        for image in plot_images:
+            if not isinstance(image, dict):
+                continue
+            web_url = image.get("web_url")
+            raw_url = image.get("raw_url")
+            img_url = image.get("img_url", raw_url) or ""
+            if web_url and raw_url:
+                desc_parts.append(self.format_screenshot(web_url, raw_url, img_url))
+                desc_parts.append("\n")
+        desc_parts.append("[/center]\n")
+        return "".join(desc_parts)
+
     def _build_book_desc_section(self, meta: Meta, header_size: int = 0, table: bool = True, underline: bool = False, bullet: str = "") -> str:
         """Build the BBCode table or list for BOOK-category uploads."""
         if self.tracker in ("TORRENTLEECH", "IMMORTALSEED", "IPTORRENTS", "SPEEDAPP"):
@@ -1074,6 +1096,7 @@ class DescriptionBuilder:
         ua_signature: bool,
         user_description: bool,
         music: bool = True,
+        dynamic_hdr_plot: bool = True,
         approved_image_hosts: list[str] | None = None,
         signature: str = "",
         desc_header: str = "",
@@ -1158,15 +1181,6 @@ class DescriptionBuilder:
                 bd_info = await self.get_bdinfo_section(meta)
                 if bd_info:
                     desc_parts.append(f"[left][font=consolas]{bd_info}[/font][/left]")
-            elif self.tracker == "MORETHANTV":
-                mediainfo_sec = await self.get_mediainfo_section(meta)
-                if mediainfo_sec:
-                    desc_parts.append(f"[mediainfo]{mediainfo_sec}[/mediainfo]\n\n")
-                bd_info = await self.get_bdinfo_section(meta)
-                if bd_info:
-                    desc_parts.append(f"[mediainfo]{bd_info}[/mediainfo]\n\n")
-                if meta.is_disc == "DVD" and isinstance(meta.discs, list) and len(meta.discs) > 0 and "vob_mi" in meta.discs[0]:
-                    desc_parts.append(f"[mediainfo]{meta.discs[0]['vob_mi']}[/mediainfo]\n\n")
             elif self.tracker == "TORRENTLEECH":
                 mediainfo_sec = await self.get_mediainfo_section(meta)
                 if mediainfo_sec:
@@ -1217,15 +1231,16 @@ class DescriptionBuilder:
         if self.tracker in {"LAJIDUI", "LONGPT", "PTCAFE", "PTFANS", "PTGTK", "RAILGUNPT", "NEXUSPHP"} and meta.nexusphp_description:
             desc_parts.append(meta.nexusphp_description)
 
+        meta_description_value = meta.description
+        if isinstance(meta_description_value, str):
+            meta_description = meta_description_value
+        elif meta_description_value is None:
+            meta_description = ""
+        else:
+            meta_description = str(meta_description_value)
+
         # Description that may come from API requests
         if description:
-            meta_description_value = meta.description
-            if isinstance(meta_description_value, str):
-                meta_description = meta_description_value
-            elif meta_description_value is None:
-                meta_description = ""
-            else:
-                meta_description = str(meta_description_value)
             # Add FraMeSToR NFO to AITHER
             if self.tracker == "AITHER" and "framestor" in meta and meta.framestor:
                 nfo_content = meta.description_nfo_content
@@ -1248,12 +1263,7 @@ class DescriptionBuilder:
                     if meta_description:
                         desc_parts.append(meta_description)
             elif meta_description:
-                if self.tracker == "MORETHANTV":
-                    meta_description = re.sub(r"\[/?quote\]", "", meta_description, flags=re.IGNORECASE).strip()
-                    if meta_description:
-                        desc_parts.append(f"[spoiler=Notes]{meta_description}[/spoiler]")
-                else:
-                    desc_parts.append(meta_description)
+                desc_parts.append(meta_description)
 
         # NFO details
         if nfo:
@@ -1268,7 +1278,12 @@ class DescriptionBuilder:
 
         # Description from file/pastebin link
         if user_description:
-            desc_parts.append(await self.get_user_description(meta))
+            user_description_content = await self.get_user_description(meta)
+            # ``gen_desc`` promotes a supplied file/link to ``meta.description``
+            # while retaining it as the user-description source.  Trackers that
+            # enable both sections must not render that same content twice.
+            if not description or user_description_content.strip() != meta_description.strip():
+                desc_parts.append(user_description_content)
 
         # Menu Screenshots
         if menu_screenshots:
@@ -1286,6 +1301,10 @@ class DescriptionBuilder:
         # Audio Spectrograms
         if audio_spectrogram:
             desc_parts.append(await self.get_audio_spectrogram_section(meta))
+
+        # Dynamic HDR metadata plots (Dolby Vision / HDR10+)
+        if dynamic_hdr_plot:
+            desc_parts.append(await self.get_dynamic_hdr_plot_section(meta))
 
         # Custom Signature
         if custom_signature:
@@ -1964,8 +1983,6 @@ class DescriptionBuilder:
             if "imgbox" not in web_url:
                 return f"[url={web_url}][img]{img_url}[/img][/url]\n"
             return f"[url={web_url}][img]{img_url}[/img][/url] "
-        if self.tracker == "MORETHANTV":
-            return f"[url={raw_url}][img={thumb_size}]{img_url}[/img][/url] "
         return f"[url={web_url}][img={thumb_size}]{raw_url}[/img][/url] "
 
     def tracker_specific_formats(self, tracker: str, description: str) -> str:
