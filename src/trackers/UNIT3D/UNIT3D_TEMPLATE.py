@@ -81,7 +81,7 @@ class Unit3dTemplate(UNIT3D):  # EDIT 'Unit3dTemplate' AS ABBREVIATED TRACKER NA
             "480i": "9",
         }
         if mapping_only:
-            return resolution_id
+            return {**resolution_id, "OTHER": "10"}
         if reverse:
             return {
                 "1": "4320p",

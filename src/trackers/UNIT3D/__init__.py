@@ -248,7 +248,7 @@ class UNIT3D:
             "480i": "9",
         }
         if mapping_only:
-            return resolution_id
+            return {**resolution_id, "OTHER": "10"}
         if reverse:
             return {v: k for k, v in resolution_id.items()}
         if resolution:

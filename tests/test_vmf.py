@@ -1,9 +1,13 @@
 import asyncio
+import json
+import sys
+from types import ModuleType
 from unittest.mock import AsyncMock
 
 import pytest
 
 from data.example_config import config as example_config
+from src.audio import bloated_check
 from src.meta import Meta
 from src.trackers.UNIT3D.vmf import VietMediaF
 
@@ -44,6 +48,7 @@ def test_vmf_profile_uses_canonical_identity_and_unit3d_endpoints():
     assert vmf.supported_categories == ("MOVIE", "TV")
     assert vmf.base_url == "https://tracker.vietmediaf.store"
     assert vmf.id_url == "https://tracker.vietmediaf.store/api/torrents/"
+    assert vmf.requests_url == "https://tracker.vietmediaf.store/api/requests/filter"
     assert vmf.search_url == "https://tracker.vietmediaf.store/api/torrents/filter"
     assert vmf.upload_url == "https://tracker.vietmediaf.store/api/torrents/upload"
     assert vmf.torrent_url == "https://tracker.vietmediaf.store/torrents/"
@@ -67,7 +72,30 @@ def test_vmf_example_config_has_only_required_tracker_credentials():
     assert "announce_url" not in vmf_config
 
 
-@pytest.mark.parametrize("language", ["Vietnamese", "vi", "vie", "vi-VN"])
+@pytest.mark.parametrize("language", ["vi", "vie", "vi-VN", "Vietnamese", "Tiếng Việt", "tieng viet"])
+def test_vmf_allows_vietnamese_audio_without_bloat_warning(monkeypatch: pytest.MonkeyPatch, language: str):
+    trackersetup_stub = ModuleType("src.trackersetup")
+    trackersetup_stub.tracker_class_map = {"VMF": VietMediaF}
+    monkeypatch.setitem(sys.modules, "src.trackersetup", trackersetup_stub)
+    meta = Meta(trackers=["VMF"])
+
+    bloated_check(meta, [language])
+
+    assert meta.bloated is False
+
+
+def test_vmf_still_warns_for_unrelated_bloated_audio(monkeypatch: pytest.MonkeyPatch):
+    trackersetup_stub = ModuleType("src.trackersetup")
+    trackersetup_stub.tracker_class_map = {"VMF": VietMediaF}
+    monkeypatch.setitem(sys.modules, "src.trackersetup", trackersetup_stub)
+    meta = Meta(trackers=["VMF"])
+
+    bloated_check(meta, ["fr"])
+
+    assert meta.bloated is True
+
+
+@pytest.mark.parametrize("language", ["Vietnamese", "vi", "vie", "vi-VN", "Tiếng Việt", "tieng viet"])
 def test_vmf_name_adds_vietnamese_tag_from_audio_language(language: str):
     assert vmf_name("Example Movie 2026 1080p WEB-DL-GRP", audio_languages=[language]) == "Example Movie 2026 ViE 1080p WEB-DL-GRP"
 
@@ -134,6 +162,9 @@ def test_vmf_name_does_not_treat_title_word_as_existing_tag(title_word: str):
         ("Example.Movie.2025.1080p.WEB-DL.ViE-GRP", {}, ["Vietnamese"], "Example.Movie.2025.ViE.1080p.WEB-DL-GRP"),
         ("Example.Movie.2025.ViE-1080p.WEB-DL-GRP", {}, ["Vietnamese"], "Example.Movie.2025.ViE.1080p.WEB-DL-GRP"),
         ("Example Movie 2025 1080p WEB-DL ViE-GRP", {}, ["Vietnamese"], "Example Movie 2025 ViE 1080p WEB-DL-GRP"),
+        ("Example Movie 2025 [ViE] 1080p WEB-DL-GRP", {}, [], "Example Movie 2025 ViE 1080p WEB-DL-GRP"),
+        ("Example Movie 2025 ([ViE]) 1080p WEB-DL-GRP", {}, [], "Example Movie 2025 ViE 1080p WEB-DL-GRP"),
+        ("Example Movie 2025 VIE DUB 1080p WEB-DL-GRP", {}, [], "Example Movie 2025 ViE DUB 1080p WEB-DL-GRP"),
     ],
 )
 def test_vmf_name_reconciles_existing_tags(name: str, audio_titles: dict[str, str], languages: list[str], expected: str):
@@ -168,6 +199,84 @@ def test_vmf_name_normalizes_whitespace_around_existing_tag_idempotently():
     assert second == first
 
 
+def test_vmf_name_does_not_treat_other_resolution_as_title_token():
+    assert (
+        vmf_name(
+            "The Other Side 2020 1080p BluRay-GRP",
+            resolution="OTHER",
+            source="BluRay",
+            audio_languages=["Vietnamese"],
+        )
+        == "The Other Side 2020 ViE 1080p BluRay-GRP"
+    )
+
+
+def test_vmf_name_does_not_treat_web_title_word_as_source():
+    assert (
+        vmf_name(
+            "Charlotte's Web-GRP",
+            resolution="",
+            source="WEB",
+            tag="-GRP",
+            audio_languages=["Vietnamese"],
+        )
+        == "Charlotte's Web ViE-GRP"
+    )
+
+
+def test_vmf_name_does_not_treat_4k_title_word_as_resolution():
+    assert (
+        vmf_name(
+            "Project 4K WEB-DL-GRP",
+            resolution="OTHER",
+            source="WEB",
+            audio_languages=["Vietnamese"],
+        )
+        == "Project 4K ViE WEB-DL-GRP"
+    )
+
+
+@pytest.mark.parametrize("resolution", ["", "OTHER", "UNKNOWN"])
+def test_vmf_name_uses_contextual_4k_alias_with_unknown_resolution(resolution: str):
+    assert (
+        vmf_name(
+            "Example Movie 2024 4K HDR WEB-DL-GRP",
+            resolution=resolution,
+            source="WEB",
+            audio_languages=["Vietnamese"],
+        )
+        == "Example Movie 2024 ViE 4K HDR WEB-DL-GRP"
+    )
+
+
+def test_vmf_name_does_not_use_trailing_group_year_as_anchor_boundary():
+    assert (
+        vmf_name(
+            "Movie.2020.1080p.BluRay.BT.2024-GRP",
+            resolution="1080p",
+            source="BluRay",
+            audio_languages=["Vietnamese"],
+        )
+        == "Movie.2020.ViE.1080p.BluRay.BT.2024-GRP"
+    )
+
+
+def test_vmf_name_is_idempotent_for_hyphen_separated_input():
+    meta = Meta(
+        name="Example-Movie-2020-1080p-WEB-DL-GRP",
+        resolution="1080p",
+        audio_languages=["Vietnamese"],
+    )
+    vmf = tracker()
+
+    first = asyncio.run(vmf.get_name(meta))["name"]
+    meta.name = first
+    second = asyncio.run(vmf.get_name(meta))["name"]
+
+    assert first == "Example-Movie-2020-ViE-1080p-WEB-DL-GRP"
+    assert second == first
+
+
 def test_vmf_name_leaves_non_vietnamese_release_unchanged():
     name = "Example.Movie.2025.1080p.WEB-DL-GRP"
 
@@ -190,6 +299,36 @@ def test_vmf_dupe_search_uses_same_tmdb_fallback_as_upload_payload():
     assert dict(request_params)["tmdbId"] == "123"
 
 
+def test_vmf_request_search_uses_endpoint_and_other_resolution_mapping(tmp_path):
+    from src.trackersetup import TrackerSetup
+
+    config = {"DEFAULT": {}, "TRACKERS": {"VMF": {"api_key": "test-key", "modq": False}}}
+    setup = TrackerSetup(config)
+    setup.get_tracker_requests = AsyncMock(
+        return_value=[
+            {
+                "id": 42,
+                "name": "Example request",
+                "description": "",
+                "category": "1",
+                "type": "4",
+                "resolution": "10",
+                "bounty": 100,
+                "status": "unfilled",
+                "claimed": False,
+                "season": None,
+                "episode": None,
+            }
+        ]
+    )
+    meta = valid_meta(resolution="OTHER", base_dir=str(tmp_path), uuid="vmf-request-test", path="Example.mkv")
+
+    assert asyncio.run(setup.tracker_request(meta, "VMF")) is True
+    assert setup.get_tracker_requests.await_args.args[2] == "https://tracker.vietmediaf.store/api/requests/filter"
+    request_log = json.loads((tmp_path / "tmp" / "VMF_request_results.json").read_text(encoding="utf-8"))
+    assert request_log[0]["url"] == "https://tracker.vietmediaf.store/requests/42"
+
+
 @pytest.mark.parametrize(
     "overrides",
     [
@@ -209,6 +348,8 @@ def test_vmf_uses_unit3d_other_resolution_fallback():
     meta = valid_meta(resolution="OTHER")
 
     assert asyncio.run(tracker().get_resolution_id(meta)) == {"resolution_id": "10"}
+    assert asyncio.run(tracker().get_resolution_id(meta, mapping_only=True))["OTHER"] == "10"
+    assert asyncio.run(tracker().get_resolution_id(meta, reverse=True))["10"] == "8640p"
 
 
 def test_vmf_mod_queue_payload_honors_config_and_meta_override():

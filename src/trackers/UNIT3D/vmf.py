@@ -16,15 +16,29 @@ class VietMediaF(UNIT3D):
     banned_groups: tuple[str, ...] = ()
     id_url = f"{base_url}/api/torrents/"
     upload_url = f"{base_url}/api/torrents/upload"
+    requests_url = f"{base_url}/api/requests/filter"
     search_url = f"{base_url}/api/torrents/filter"
     torrent_url = f"{base_url}/torrents/"
     supported_categories = ("MOVIE", "TV")
     tracker_urls = (base_url,)
+    allowed_bloated_audio_languages = ("vi", "tiếng việt", "tieng viet")
 
-    _vmf_tag_pattern = re.compile(r"(?<![A-Za-z0-9])ViE(?:[ .-]+(?P<dub>(?i:DUB)))?(?![A-Za-z0-9])")
+    _vmf_tag_pattern = re.compile(
+        r"(?<![A-Za-z0-9])(?:ViE(?:[ .-]+(?P<dub>(?i:DUB)))?|(?P<casefolded_dub>(?i:VIE[ .-]+DUB)))(?![A-Za-z0-9])"
+    )
     _resolution_pattern = re.compile(r"(?<![A-Za-z0-9])(?:8640p|4320p|2160p|1440p|1080[pi]|720p|576[pi]|480[pi]|8K|4K)(?![A-Za-z0-9])", re.IGNORECASE)
+    _resolution_anchor_pattern = re.compile(r"(?<![A-Za-z0-9])(?:8640p|4320p|2160p|1440p|1080[pi]|720p|576[pi]|480[pi])(?![A-Za-z0-9])", re.IGNORECASE)
+    _resolution_alias_anchor_pattern = re.compile(
+        r"(?<![A-Za-z0-9])(?:8K|4K)(?=(?:[ .-]+(?P<modifier>HDR(?:10(?:\+|Plus)?)?|DV|DoVi|HLG|SDR|Dolby[ .-]?Vision))*"
+        r"[ .-]+(?:UHD[ .-]?Blu[ .-]?Ray|Blu[ .-]?Ray|WEB[ .-]?(?:DL|Rip)|HDTV|DVD|REMUX)(?![A-Za-z0-9]))",
+        re.IGNORECASE,
+    )
     _source_pattern = re.compile(
         r"(?<![A-Za-z0-9])(?:UHD[ .-]?BluRay|Blu[ .-]?Ray|WEB(?:[ .-]?(?:DL|Rip))?|HDTV|DVD|REMUX)(?![A-Za-z0-9])",
+        re.IGNORECASE,
+    )
+    _source_anchor_pattern = re.compile(
+        r"(?<![A-Za-z0-9])(?:UHD[ .-]?Blu[ .-]?Ray|Blu[ .-]?Ray|WEB[ .-]?(?:DL|Rip)|HDTV|DVD|REMUX)(?![A-Za-z0-9])",
         re.IGNORECASE,
     )
     _dub_title_tokens = (re.compile(r"\blong\s+tieng\b"), re.compile(r"\b(?:uslt|vnlt)\b"))
@@ -83,14 +97,15 @@ class VietMediaF(UNIT3D):
         for language in languages:
             if not isinstance(language, str):
                 continue
-            if cls._vietnamese_language_tokens.intersection(cls._normalized_words(language).split()):
+            normalized_language = cls._normalized_words(language)
+            if cls._vietnamese_language_tokens.intersection(normalized_language.split()) or "tieng viet" in normalized_language:
                 return "vie"
         return None
 
     @classmethod
     def _existing_audio_tag(cls, name: str) -> str | None:
         matches = list(cls._vmf_tag_pattern.finditer(name))
-        if any(match.group("dub") for match in matches):
+        if any(match.group("dub") or match.group("casefolded_dub") for match in matches):
             return "dub"
         if matches:
             return "vie"
@@ -100,12 +115,24 @@ class VietMediaF(UNIT3D):
     def _remove_existing_audio_tags(cls, name: str) -> str:
         cleaned = name
         matches = list(cls._vmf_tag_pattern.finditer(name))
+        wrapper_pairs = {"[": "]", "(": ")", "{": "}"}
 
         # Work right-to-left so each original match offset remains valid while
         # adjacent separators are collapsed into one canonical gap.
         for match in reversed(matches):
-            left = cleaned[: match.start()]
-            right = cleaned[match.end() :]
+            tag_start = match.start()
+            tag_end = match.end()
+
+            while True:
+                left_wrapper_match = re.search(r"(?P<wrapper>\[|\(|\{)\s*$", cleaned[:tag_start])
+                right_wrapper_match = re.match(r"\s*(?P<wrapper>\]|\)|\})", cleaned[tag_end:])
+                if not left_wrapper_match or not right_wrapper_match or wrapper_pairs[left_wrapper_match.group("wrapper")] != right_wrapper_match.group("wrapper"):
+                    break
+                tag_start = left_wrapper_match.start()
+                tag_end += right_wrapper_match.end()
+
+            left = cleaned[:tag_start]
+            right = cleaned[tag_end:]
             left_separator_match = re.search(r"[\s.-]+$", left)
             right_separator_match = re.match(r"[\s.-]+", right)
             left_separator = left_separator_match.group() if left_separator_match else ""
@@ -123,11 +150,13 @@ class VietMediaF(UNIT3D):
                     replacement = "."
                 elif any(character.isspace() for character in left_separator + right_separator):
                     replacement = " "
+                elif "-" in left_separator or "-" in right_separator:
+                    replacement = "-"
                 else:
                     replacement = "." if "." in name and " " not in name else " "
 
-            start = match.start() - len(left_separator)
-            end = match.end() + len(right_separator)
+            start = tag_start - len(left_separator)
+            end = tag_end + len(right_separator)
             cleaned = f"{cleaned[:start]}{replacement}{cleaned[end:]}"
 
         return cleaned.strip().strip(".-").strip()
@@ -139,16 +168,30 @@ class VietMediaF(UNIT3D):
 
     @classmethod
     def _resolution_anchor(cls, name: str, resolution: str) -> int | None:
-        if resolution:
+        unknown_resolution = resolution.strip().casefold() in {"other", "unknown"}
+        if resolution and not unknown_resolution:
             resolution_pattern = re.compile(rf"(?<![A-Za-z0-9]){re.escape(resolution)}(?![A-Za-z0-9])", re.IGNORECASE)
             anchor = cls._last_match_start(resolution_pattern, name)
             if anchor is not None:
                 return anchor
-        return cls._last_match_start(cls._resolution_pattern, name)
+        anchor = cls._last_match_start(cls._resolution_anchor_pattern, name)
+        if anchor is not None:
+            return anchor
+
+        alias_matches = list(cls._resolution_alias_anchor_pattern.finditer(name))
+        if unknown_resolution:
+            # OTHER/UNKNOWN cannot confirm a bare 4K/8K title word. A video
+            # modifier supplies enough context to treat the alias as technical.
+            alias_matches = [match for match in alias_matches if match.group("modifier")]
+        return alias_matches[-1].start() if alias_matches else None
 
     @classmethod
     def _source_anchor(cls, name: str, source: str) -> int | None:
-        if source:
+        anchor = cls._last_match_start(cls._source_anchor_pattern, name)
+        if anchor is not None:
+            return anchor
+
+        if source and source.strip().casefold() != "web":
             source_parts = [re.escape(part) for part in re.split(r"[ .]+", source.strip()) if part]
             if source_parts:
                 source_expression = r"[ .]+".join(source_parts)
@@ -156,14 +199,14 @@ class VietMediaF(UNIT3D):
                 anchor = cls._last_match_start(source_pattern, name)
                 if anchor is not None:
                     return anchor
-        return cls._last_match_start(cls._source_pattern, name)
+        return None
 
     @staticmethod
     def _release_separator(name: str, anchor: int | None = None) -> str:
         if anchor is not None and anchor > 0:
             preceding_character = name[anchor - 1]
-            if preceding_character == ".":
-                return "."
+            if preceding_character in ".-":
+                return preceding_character
             if preceding_character.isspace():
                 return " "
         return "." if "." in name and " " not in name else " "
@@ -187,7 +230,7 @@ class VietMediaF(UNIT3D):
         if technical_anchor is not None:
             separator = cls._release_separator(name, technical_anchor)
             rendered_tag = f"ViE{separator}DUB" if tag_kind == "dub" else "ViE"
-            if technical_anchor > 0 and (name[technical_anchor - 1] == "." or name[technical_anchor - 1].isspace()):
+            if technical_anchor > 0 and (name[technical_anchor - 1] in ".-" or name[technical_anchor - 1].isspace()):
                 return f"{name[:technical_anchor]}{rendered_tag}{separator}{name[technical_anchor:]}"
             prefix_separator = separator if technical_anchor > 0 else ""
             return f"{name[:technical_anchor]}{prefix_separator}{rendered_tag}{separator}{name[technical_anchor:]}"
