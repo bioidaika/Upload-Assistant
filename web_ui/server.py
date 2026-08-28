@@ -4101,10 +4101,17 @@ def get_trackers():
         base_url = getattr(tracker_class, "base_url", "")
         favicon_url = ""
         static_dir = Path(__file__).parent / "static"
-        for ext in ["png", "svg", "ico"]:
-            local_path = static_dir / "img" / "trackers" / f"{tracker_name.lower()}.{ext}"
-            if local_path.is_file():
-                favicon_url = f"/static/img/trackers/{tracker_name.lower()}.{ext}"
+        # Try acronym first (e.g. vmf.png), then display name (e.g. vietmediaf.png)
+        candidate_names = [tracker_name.lower()]
+        if display_name.lower() != tracker_name.lower():
+            candidate_names.append(display_name.lower())
+        for name in candidate_names:
+            for ext in ["png", "svg", "ico"]:
+                local_path = static_dir / "img" / "trackers" / f"{name}.{ext}"
+                if local_path.is_file():
+                    favicon_url = f"/static/img/trackers/{name}.{ext}"
+                    break
+            if favicon_url:
                 break
 
         trackers_data.append(
