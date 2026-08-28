@@ -35,7 +35,7 @@ class VideoManager:
     async def get_hdr(self, mi: Any, bdinfo: Any | None) -> str:
         hdr = ""
         dv = ""
-        if bdinfo is not None:  # Disks
+        if bdinfo:  # Disks
             bdinfo_dict = cast(dict[str, Any], bdinfo)
             for track in bdinfo_dict.get("video", []):
                 hdr_mi = track.get("hdr_dv", "")
@@ -318,17 +318,14 @@ class VideoManager:
                 type = "WEBDL"
             elif "webrip" in filename:
                 type = "WEBRIP"
-            # elif scene == True:
-            # type = "ENCODE"
             elif "hdtv" in filename:
                 type = "HDTV"
             elif is_disc:
                 type = "DISC"
             elif "dvdrip" in filename:
                 type = "DVDRIP"
-                # exit()
             else:
-                type = "ENCODE"
+                type = "WEBDL" if meta.category == "XXX" else "ENCODE"
         return type
 
     async def is_3d(self, bdinfo: Any | None) -> str:

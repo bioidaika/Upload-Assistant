@@ -5,6 +5,8 @@ from pathlib import Path
 
 from src.meta import Meta
 from src.screenshot_review import (
+    ReviewedScreenshot,
+    _capture_fresh_frame,
     _disc_bdinfo_for_group,
     add_screenshot,
     apply_staged_remote_uploads,
@@ -77,6 +79,39 @@ def test_list_screenshots_includes_disc_video_frames_with_stable_opaque_ids(tmp_
     assert regular[0].id.startswith("local-")
 
 
+def test_list_screenshots_includes_webp_contact_sheets(tmp_path: Path) -> None:
+    screenshots_dir = tmp_path / "screenshots"
+    screenshots_dir.mkdir()
+    webp = screenshots_dir / "xxx-contact-sheet-1.webp"
+    webp.write_bytes(b"webp")
+
+    items = list_screenshots(tmp_path, {"category": "XXX"})
+
+    assert [item.path for item in items] == [webp]
+
+
+def test_list_screenshots_orders_numeric_jpeg_and_webp_frames(tmp_path: Path) -> None:
+    screenshots_dir = tmp_path / "screenshots"
+    screenshots_dir.mkdir()
+    ten = screenshots_dir / "Release-10.webp"
+    two = screenshots_dir / "Release-2.jpg"
+    ten.write_bytes(b"webp")
+    two.write_bytes(b"jpg")
+
+    items = list_screenshots(tmp_path, {"category": "XXX"})
+
+    assert [item.path for item in items] == [two, ten]
+
+
+def test_list_screenshots_excludes_reserved_artwork_stems_for_all_formats(tmp_path: Path) -> None:
+    screenshots_dir = tmp_path / "screenshots"
+    screenshots_dir.mkdir()
+    for filename in ("poster.jpg", "cover.jpeg", "music_cover.webp"):
+        (screenshots_dir / filename).write_bytes(b"artwork")
+
+    assert list_screenshots(tmp_path, {"category": "XXX"}) == []
+
+
 def test_add_bdmv_screenshot_uses_disc_capture_and_opaque_id(tmp_path: Path, monkeypatch) -> None:
     release_id = "release"
     screenshots_dir = tmp_path / "tmp" / release_id / "screenshots"
@@ -103,6 +138,38 @@ def test_add_bdmv_screenshot_uses_disc_capture_and_opaque_id(tmp_path: Path, mon
     assert addition.path.name.endswith(".png")
     assert len(addition.path.stem) == 32
     assert addition.path != screenshots_dir / existing.name
+
+
+def test_review_capture_uses_shared_tonemapping_decision(tmp_path: Path, monkeypatch) -> None:
+    source = tmp_path / "source.mkv"
+    source.write_bytes(b"video")
+    screenshots_dir = tmp_path / "screenshots"
+    screenshots_dir.mkdir()
+    target = ReviewedScreenshot("local-test", screenshots_dir / "frame.png", 0)
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr("src.screenshot_review._video_properties", lambda _temp_dir: (1920, 1080, 1, 1, 100, 24))
+
+    async def determine_stub(*_args):
+        meta = _args[-1]
+        meta.tonemapped = True
+        meta.libplacebo = True
+        return True
+
+    async def capture_stub(args):
+        captured["tonemapped"] = args[-1].tonemapped
+        captured["libplacebo"] = args[-1].libplacebo
+        captured["hdr_tonemap"] = args[-2]
+        Path(args[3]).write_bytes(b"tonemapped")
+        return args[0], args[3]
+
+    monkeypatch.setattr("src.screenshot_review.determine_tonemapping", determine_stub)
+    monkeypatch.setattr("src.screenshot_review.capture_screenshot", capture_stub)
+
+    asyncio.run(_capture_fresh_frame(tmp_path, {"filelist": [str(source)], "hdr": "HDR"}, target))
+
+    assert captured == {"tonemapped": True, "libplacebo": True, "hdr_tonemap": True}
+    assert target.path.read_bytes() == b"tonemapped"
 
 
 def test_disc_review_keeps_late_local_playlist_frames_visible_with_remote_images(tmp_path: Path) -> None:

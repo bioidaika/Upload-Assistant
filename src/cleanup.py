@@ -35,11 +35,11 @@ class CleanupManager:
         """Ensure all running tasks, threads, and subprocesses are properly cleaned up before exiting."""
         # console.print("[yellow]Cleaning up tasks before exiting...[/yellow]")
 
-        # Step 1: Shutdown ThreadPoolExecutor **before checking for threads**
+        # Step 1: Shutdown ThreadPoolExecutor **without blocking the event loop**
         global thread_executor
         if thread_executor:
             # console.print("[yellow]Shutting down thread pool executor...[/yellow]")
-            thread_executor.shutdown(wait=True)  # Ensure threads terminate before proceeding
+            thread_executor.shutdown(wait=False, cancel_futures=True)  # Don't block event loop if threads are stuck
             thread_executor = None  # Remove reference
 
         # 🔹 Step 1: Stop the monitoring thread safely
@@ -246,13 +246,13 @@ class CleanupManager:
 
 
 # Wrapped "erase key check and save" in tty check so that Python won't complain if UA is called by a script
-if hasattr(sys.stdin, "isatty") and sys.stdin.isatty() and not sys.stdin.closed:
+if os.name == "posix" and not IS_ANDROID and hasattr(sys.stdin, "isatty") and sys.stdin.isatty() and not sys.stdin.closed:
     try:
-        output = subprocess.check_output(["stty", "-a"]).decode()  # noqa: S607
+        output = subprocess.check_output(["stty", "-a"], stderr=subprocess.DEVNULL).decode()  # noqa: S607
         match = re.search(r" erase = (\S+);", output)
         if match:
             erase_key = match.group(1)
-    except OSError:
+    except OSError, subprocess.SubprocessError:
         pass
 
 

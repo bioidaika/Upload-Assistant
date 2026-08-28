@@ -26,15 +26,57 @@ from src.exportmi import export_info, get_conformance_error, mi_resolution, vali
 from src.get_source import get_source
 from src.imdb import imdb_manager
 from src.languages import languages_manager
+from src.media_extensions import VIDEO_EXTENSIONS
 from src.meta import Meta
 from src.region import get_distributor, get_region, get_service
 from src.tags import get_tag, tag_override
 from src.tvmaze import tvmaze_manager
 from src.video import video_manager
+from src.xxx_keywords import extract_xxx_keywords
+from src.xxx_platforms import XXX_PLATFORM_KEYWORDS
 
 guessit_module: Any = cast(Any, guessit)
 
 _URL_TOKEN_RE = re.compile(r"https?://[^\s<>'\"()]+", re.IGNORECASE)
+
+XXX_RELEASE_MARKERS = XXX_PLATFORM_KEYWORDS | {"xxx"}
+_XXX_RELEASE_MARKER_RE = re.compile(rf"(?<![a-z0-9])(?:{'|'.join(re.escape(marker) for marker in sorted(XXX_RELEASE_MARKERS))})(?![a-z0-9])", re.IGNORECASE)
+_VIDEO_EXTENSIONS = VIDEO_EXTENSIONS
+
+_XXX_NAMING_RE = re.compile(
+    r"^(?P<publisher>[^.]+)\.(?P<date>\d{4}|\d{2}\.\d{2}\.\d{2})\."
+    r"(?P<title>.+?)\.XXX(?:\.(?P<format>[^.]+))?(?:-.*)?$",
+    re.IGNORECASE,
+)
+
+
+def extract_xxx_metadata(name: str) -> dict[str, Any]:
+    """Extract metadata from the supported XXX release naming convention."""
+    candidate = Path(name).stem if Path(name).suffix else name
+    match = _XXX_NAMING_RE.fullmatch(candidate)
+    if not match:
+        return {}
+    date = match.group("date")
+    if len(date) == 8:
+        year, month, day = date.split(".")
+        year = str(2000 + int(year))
+        release_date = f"{year}-{month}-{day}"
+    else:
+        year, release_date = date, date
+    title = match.group("title").replace(".", " ")
+    title = re.sub(r"\s+\d{3,4}[pi]$", "", title, flags=re.IGNORECASE)
+    return {"publisher": match.group("publisher"), "release_date": release_date, "year": int(year), "title": title}
+
+
+def is_xxx_video_release(path: str | Path) -> bool:
+    """Return whether a video release name carries a specific XXX platform marker."""
+    candidate = Path(path)
+    if candidate.is_file():
+        return candidate.suffix.lower() in _VIDEO_EXTENSIONS and bool(_XXX_RELEASE_MARKER_RE.search(candidate.name))
+
+    if not candidate.is_dir() or not _XXX_RELEASE_MARKER_RE.search(candidate.name):
+        return False
+    return any(file.is_file() and file.suffix.lower() in _VIDEO_EXTENSIONS for file in candidate.rglob("*"))
 
 
 def _is_igdb_url(url: str) -> bool:
@@ -68,11 +110,17 @@ def guessit_fn(value: str, options: dict[str, Any] | None = None) -> dict[str, A
 
 
 def _normalize_search_year(value: Any) -> str | None:
-    if value in (None, ""):
+    if value is None or value == "":
         return None
-    if isinstance(value, (str, int)):
-        return str(value)
-    return str(value)
+    if isinstance(value, (list, tuple, set)):
+        for candidate in value:
+            normalized = _normalize_search_year(candidate)
+            if normalized is not None:
+                return normalized
+        return None
+
+    year_match = re.search(r"\b(?:18|19|20)\d{2}\b", str(value))
+    return year_match.group(0) if year_match else None
 
 
 def _to_int(value: Any, default: int = 0) -> int:
@@ -80,6 +128,25 @@ def _to_int(value: Any, default: int = 0) -> int:
         return int(value)
     except TypeError, ValueError:
         return default
+
+
+def check_pre_release(meta: Meta) -> bool:
+    release_type = (meta.type or "").upper()
+    rel_source = (meta.source or "").upper()
+    forbidden_types = (
+        "CAM",
+        "DCP",
+        "HDCAM",
+        "SCR",
+        "SCREENER",
+        "TC",
+        "TELECINE",
+        "TELESYNC",
+        "TS",
+        "WORKPRINT",
+        "WP",
+    )
+    return release_type in forbidden_types or rel_source in forbidden_types or "CAM" in release_type
 
 
 def _title_without_leading_article(title: str) -> str:
@@ -104,11 +171,18 @@ def init_meta(prep_instance: Any, meta: Meta, mode: str) -> tuple[bool, bool, Cl
     base_dir = meta.base_dir
     meta.saved_description = False
     client = Clients(config=prep_instance.config)
-    meta.skip_auto_torrent = meta.skip_auto_torrent or prep_instance.config["DEFAULT"].get("skip_auto_torrent", False)
+    default_config = prep_instance.config["DEFAULT"]
+    # Screenshot capture starts during prep, before the upload stage. Populate
+    # the overlay setting here so that the early capture sees the configured
+    # value instead of Meta's default.
+    meta.frame_overlay = default_config.get("frame_overlay", False)
+    meta.skip_auto_torrent = (
+        meta.skip_auto_torrent or default_config.get("skip_auto_torrent", False) or (meta.personalrelease and default_config.get("skip_auto_torrent_personalrelease", False))
+    )
     hash_ids = ["infohash", "torrent_hash", "skip_auto_torrent"]
     from src.trackersetup import api_trackers
 
-    tracker_ids = [t.lower() for t in api_trackers] + ["ptp", "btn", "hdb", "orpheus"]
+    tracker_ids = [t.lower() for t in api_trackers] + ["ptp", "broadcasthenet", "hdb", "orpheus"]
     use_sonarr = prep_instance.config["DEFAULT"].get("use_sonarr", False)
     use_radarr = prep_instance.config["DEFAULT"].get("use_radarr", False)
     meta.print_tracker_messages = prep_instance.config["DEFAULT"].get("print_tracker_messages", False)
@@ -135,6 +209,7 @@ def init_meta(prep_instance: Any, meta: Meta, mode: str) -> tuple[bool, bool, Cl
     meta.not_anime = False
     meta.subtitle_files = cast(list[str], [])
     meta.adult_media = False
+    meta.pre_release = check_pre_release(meta)
 
     folder_id = Path(meta.path or "").name
     if not meta.uuid:
@@ -347,6 +422,18 @@ async def detect_disc_and_category(prep_instance: Any, meta: Meta) -> tuple[str,
         if is_game:
             meta.category = "GAME"
             logger.debug("[cyan]Auto-detected category: GAME[/cyan]")
+
+    # Auto-detect XXX video releases from specific platform markers in the
+    # release file or directory name.  This runs after file-type detection so
+    # a similarly named non-video download is never classified as XXX.
+    if not meta.category and not meta.manual_category and not meta.is_disc and meta.path and await asyncio.to_thread(is_xxx_video_release, meta.path):
+        meta.category = "XXX"
+        logger.debug("[cyan]Auto-detected category: XXX[/cyan]")
+
+    if meta.category == "XXX":
+        for field_name, value in extract_xxx_metadata(meta.basename_no_ext).items():
+            if not getattr(meta, field_name):
+                setattr(meta, field_name, value)
 
     return videoloc, bdinfo
 
@@ -592,6 +679,8 @@ async def process_media_files(prep_instance: Any, meta: Meta, videoloc: str, bdi
         filename = filename.split("AKA")[0]
     meta.filename = filename
     meta.bdinfo = bdinfo
+    if meta.category == "XXX":
+        meta.keywords = extract_xxx_keywords(meta.basename_no_ext, meta.keywords)
 
     return filename, untouched_filename, videopath, search_term, search_file_folder, mi, video
 
@@ -697,7 +786,7 @@ async def validate_media(_prep_instance: Any, meta: Meta) -> None:
 
 
 async def process_trackers_and_torrent(
-    prep_instance: Any, meta: Meta, client: Clients, hash_ids: list[str], tracker_ids: list[str], _search_term: str, _search_file_folder: str
+    prep_instance: Any, meta: Meta, client: Clients, hash_ids: list[str], _tracker_ids: list[str], _search_term: str, _search_file_folder: str
 ) -> None:
     if "description" not in meta or meta.description is None:
         meta.description = ""
@@ -720,7 +809,7 @@ async def process_trackers_and_torrent(
     # Find one reusable torrent while all local files (including external
     # subtitles) are known. Its path is cached for the upload stage, which
     # prevents a second full client search later in the run.
-    if not any(meta.get(id_type) for id_type in hash_ids + tracker_ids) and not meta.skip_trackers and not meta.edit:
+    if not (any(meta.get(id_type) for id_type in hash_ids) or meta.tracker_ids) and not meta.skip_trackers and not meta.edit:
         reuse_torrent_path = await client.find_existing_torrent(meta)
         if reuse_torrent_path:
             meta.reuse_torrent_path = reuse_torrent_path
@@ -735,6 +824,15 @@ async def process_trackers_and_torrent(
             # Fetch properties only: this preserves comment/tracker-ID discovery
             # without running another name-based torrent search or exporting it.
             await client.get_ptp_from_hash(meta, pathed=True, client_name=meta.reuse_torrent_client)
+
+
+def _clear_imdb_metadata(meta: Meta) -> None:
+    meta.imdb_manual = 0
+    meta.imdb_id = 0
+    meta.imdb_info = {}
+    meta.imdb = "0"
+    meta.imdb_tt = ""
+    meta.imdb_rating = ""
 
 
 async def search_metadata(
@@ -759,6 +857,9 @@ async def search_metadata(
     meta.tvdb_manual = meta.tvdb_manual or 0
     meta.tvmaze_manual = meta.tvmaze_manual or 0
 
+    if meta.no_imdb:
+        _clear_imdb_metadata(meta)
+
     # Set tmdb_id
     try:
         if meta.tmdb_manual:
@@ -771,7 +872,7 @@ async def search_metadata(
 
     # Set imdb_id with proper handling for 'tt' prefix
     try:
-        if not meta.imdb_id:
+        if not meta.no_imdb and not meta.imdb_id:
             imdb_value = meta.imdb_manual
             if imdb_value:
                 if str(imdb_value).startswith("tt"):
@@ -933,6 +1034,9 @@ async def search_metadata(
         # set a flag so that the other check later doesn't run
         meta.no_override = True
 
+    if meta.no_imdb:
+        _clear_imdb_metadata(meta)
+
     logger.debug("ID inputs into prep")
     logger.debug(f"Category: {meta.category}")
     logger.debug(f"Raw TVDB ID: {meta.tvdb_id} (type: {type(meta.tvdb_id).__name__})")
@@ -967,8 +1071,10 @@ async def search_metadata(
     mi_data: dict[str, Any] = mi or {}
 
     # Run a check against mediainfo to see if it has tmdb/imdb
-    if (meta.tmdb_id == 0 or meta.imdb_id == 0) and meta.category not in ("BOOK", "GAME"):
+    if (meta.tmdb_id == 0 or meta.imdb_id == 0) and meta.category not in ("BOOK", "GAME", "XXX"):
         meta.category, meta.tmdb_id, meta.imdb_id, meta.tvdb_id = await prep_instance.tmdb_manager.get_tmdb_imdb_from_mediainfo(mi_data, meta)
+        if meta.no_imdb:
+            _clear_imdb_metadata(meta)
 
     meta.video_duration = await video_manager.get_video_duration(meta)
     duration = meta.video_duration
@@ -977,7 +1083,7 @@ async def search_metadata(
     debug = bool(meta.debug)
 
     # run a search to find tmdb and imdb ids if we don't have them
-    if int(meta.tmdb_id or 0) == 0 and int(meta.imdb_id or 0) == 0 and meta.category not in ("BOOK", "GAME"):
+    if int(meta.tmdb_id or 0) == 0 and int(meta.imdb_id or 0) == 0 and meta.category not in ("BOOK", "GAME", "XXX"):
         year = meta.manual_year or meta.search_year or meta.year if meta.category == "TV" else meta.manual_year or meta.year or meta.search_year
         year_value = _normalize_search_year(year)
         category_pref = meta.category or ""
@@ -993,19 +1099,23 @@ async def search_metadata(
                 unattended=unattended,
             )
         )
-        imdb_task: asyncio.Task[int] = asyncio.create_task(
-            imdb_manager.search_imdb(
-                filename,
-                year_value,
-                quickie=True,
-                category=category_pref,
-                secondary_title=meta.secondary_title,
-                untouched_filename=untouched_filename,
-                duration=duration,
-                unattended=unattended,
+        if meta.no_imdb:
+            tmdb_result = await tmdb_task
+            imdb_result = 0
+        else:
+            imdb_task: asyncio.Task[int] = asyncio.create_task(
+                imdb_manager.search_imdb(
+                    filename,
+                    year_value,
+                    quickie=True,
+                    category=category_pref,
+                    secondary_title=meta.secondary_title,
+                    untouched_filename=untouched_filename,
+                    duration=duration,
+                    unattended=unattended,
+                )
             )
-        )
-        tmdb_result, imdb_result = await asyncio.gather(tmdb_task, imdb_task)
+            tmdb_result, imdb_result = await asyncio.gather(tmdb_task, imdb_task)
         tmdb_id, category = tmdb_result
         meta.category = category
         meta.tmdb_id = _to_int(tmdb_id)
@@ -1014,7 +1124,7 @@ async def search_metadata(
         meta.no_ids = True
 
     # If we have an IMDb ID but no TMDb ID, fetch TMDb ID from IMDb
-    if int(meta.imdb_id or 0) != 0 and int(meta.tmdb_id or 0) == 0 and meta.category not in ("BOOK", "GAME"):
+    if int(meta.imdb_id or 0) != 0 and int(meta.tmdb_id or 0) == 0 and meta.category not in ("BOOK", "GAME", "XXX"):
         imdb_id_value = _to_int(meta.imdb_id)
         tvdb_id_value = _to_int(meta.tvdb_id)
         search_year_value = _normalize_search_year(meta.search_year)
@@ -1057,6 +1167,8 @@ async def search_metadata(
     # we should have tmdb id one way or another, so lets get data if needed
     if int(meta.tmdb_id or 0) != 0:
         await prep_instance.tmdb_manager.set_tmdb_metadata(meta, filename)
+        if meta.no_imdb:
+            _clear_imdb_metadata(meta)
 
     # If there was no original language set before the combined metadata searching, tvdb changes mean we might have set a bad tvdb series name
     # Now that we have original language, we can safely kill the tvdb series name if it was en original to account for the change
@@ -1064,14 +1176,14 @@ async def search_metadata(
         meta.tvdb_series_name = None
 
     # If there's a mismatch between IMDb and TMDb IDs, try to resolve it
-    if meta.imdb_mismatch and "subsplease" not in meta.uuid.lower():
+    if not meta.no_imdb and meta.imdb_mismatch and "subsplease" not in meta.uuid.lower():
         logger.debug("[yellow]IMDb ID mismatch detected, attempting to resolve...[/yellow]")
         # with refactored tmdb, it quite likely to be correct
         meta.imdb_id = meta.mismatched_imdb_id
         meta.imdb_info = {}
 
     # Get IMDb ID if not set
-    if meta.imdb_id == 0 and meta.category not in ("BOOK", "GAME"):
+    if not meta.no_imdb and meta.imdb_id == 0 and meta.category not in ("BOOK", "GAME", "XXX"):
         try:
             search_year_value = _normalize_search_year(meta.search_year)
             meta.imdb_id = await imdb_manager.search_imdb(
@@ -1090,7 +1202,7 @@ async def search_metadata(
             raise Exception(f"Error searching IMDb: {e}") from e
 
     # user might have skipped tmdb earlier, lets double check
-    if meta.imdb_id != 0 and meta.tmdb_id == 0 and meta.category not in ("BOOK", "GAME"):
+    if meta.imdb_id != 0 and meta.tmdb_id == 0 and meta.category not in ("BOOK", "GAME", "XXX"):
         logger.info("[yellow]No TMDB ID found, attempting to fetch from IMDb...[/yellow]")
         imdb_id_value = _to_int(meta.imdb_id)
         tvdb_id_value = _to_int(meta.tvdb_id)
@@ -1112,14 +1224,18 @@ async def search_metadata(
         meta.no_ids = filename_search
 
     tmdb_id_value = _to_int(meta.tmdb_id)
-    if tmdb_id_value != 0 and meta.category not in ("BOOK", "GAME"):
+    if tmdb_id_value != 0 and meta.category not in ("BOOK", "GAME", "XXX"):
         await prep_instance.tmdb_manager.set_tmdb_metadata(meta, filename)
+        if meta.no_imdb:
+            _clear_imdb_metadata(meta)
 
     # Ensure IMDb info is retrieved if it wasn't already fetched or was cleared.
     imdb_id_value = _to_int(meta.imdb_id)
-    if not meta.imdb_info and imdb_id_value != 0 and meta.category not in ("BOOK", "GAME"):
+    if not meta.no_imdb and not meta.imdb_info and imdb_id_value != 0 and meta.category not in ("BOOK", "GAME", "XXX"):
         imdb_info = await imdb_manager.get_imdb_info_api(imdb_id_value, manual_language=meta.manual_language, base_dir=meta.base_dir, config=prep_instance.config)
         meta.imdb_info = imdb_info
+
+    meta.populate_cast()
 
 
 async def finalize_metadata(
@@ -1232,7 +1348,7 @@ async def finalize_metadata(
         # all your episode data belongs to us
         meta = await prep_instance.metadata_searching_manager.get_tv_data(meta)
 
-        if meta.tvdb_imdb_id:
+        if meta.tvdb_imdb_id and not meta.no_imdb:
             imdb = meta.tvdb_imdb_id.replace("tt", "")
             if imdb.isdigit() and imdb != meta.imdb_id:
                 episode_info = await imdb_manager.get_imdb_from_episode(imdb)
@@ -1531,6 +1647,13 @@ async def finalize_metadata(
                 unique_genres.append(genre)
 
         meta.combined_genres = ", ".join(unique_genres) if unique_genres else ""
+
+    if meta.category == "XXX" and not meta.audio:
+        meta.audio, meta.channels, meta.has_commentary = await prep_instance.audio_manager.get_audio_v2(mi_data, meta, bdinfo)
+    if meta.category == "XXX" and not meta.video_codec:
+        meta.video_encode, meta.video_codec, meta.has_encode_settings, meta.bit_depth = await video_manager.get_video_encode(mi_data, meta.type, bdinfo)
+
+    if meta.category in ("TV", "MOVIE", "XXX"):
         meta.adult_media = prep_instance.check_adult_media(meta)
 
     # Process group tag for all categories (TV, MOVIE, BOOK, etc.)
@@ -1625,6 +1748,8 @@ async def finalize_metadata(
             meta.overview = ""
         if not meta.genres:
             meta.genres = []
+    elif meta.category == "XXX":
+        meta.container = Path(videopath).suffix.lstrip(".").lower()
     elif meta.category == "GAME":
         meta.container = Path(videopath).suffix.lstrip(".").lower()
         meta.audio = ""
@@ -1701,3 +1826,5 @@ async def finalize_metadata(
                         meta.tmdb_localized_data.setdefault(lang, {})[data_type] = result
         except Exception as e:
             logger.error(f"[red]Error pre-fetching TMDB localized data: {e}[/red]")
+
+    meta.pre_release = check_pre_release(meta)

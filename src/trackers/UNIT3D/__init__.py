@@ -180,7 +180,13 @@ class UNIT3D:
         return {"name": meta.name}
 
     async def get_description(self, meta: Meta) -> Any:
-        return {"description": await DescriptionBuilder(self.tracker, self.config).unit3d_edit_desc(meta)}
+        return {
+            "description": await DescriptionBuilder(self.tracker, self.config).general_description_generator(
+                meta,
+                mediainfo=False,
+                nfo=False,
+            )
+        }
 
     async def get_mediainfo(self, meta: Meta) -> dict[str, str]:
         if meta.bdinfo or (meta.category in ["GAME", "BOOK"] and not meta.audiobook):
@@ -368,8 +374,8 @@ class UNIT3D:
         return data
 
     async def get_featured(self, meta: Meta) -> dict[str, str]:
-        _meta = meta
-        return {"featured": "0"}
+        featured = await self.get_flag(meta, "featured")
+        return {"featured": featured}
 
     async def get_free(self, meta: Meta) -> dict[str, str]:
         free = "0"
@@ -379,12 +385,16 @@ class UNIT3D:
         return {"free": free}
 
     async def get_doubleup(self, meta: Meta) -> dict[str, str]:
-        _meta = meta
-        return {"doubleup": "0"}
+        doubleup = await self.get_flag(meta, "doubleup")
+        if doubleup == "0":
+            doubleup = await self.get_flag(meta, "double_upload")
+        if doubleup == "0":
+            doubleup = await self.get_flag(meta, "double_up")
+        return {"doubleup": doubleup}
 
     async def get_sticky(self, meta: Meta) -> dict[str, str]:
-        _meta = meta
-        return {"sticky": "0"}
+        sticky = await self.get_flag(meta, "sticky")
+        return {"sticky": sticky}
 
     async def get_data(self, meta: Meta) -> dict[str, str]:
         results = await asyncio.gather(
@@ -511,7 +521,11 @@ class UNIT3D:
 
         if meta.debug is False:
             response_data = {}
-            max_retries = 2
+            try:
+                default_retries = self.config.get("DEFAULT", {}).get("max_retries", 2)
+                max_retries = max(1, int(self.tracker_config.get("max_retries", default_retries)))
+            except ValueError, TypeError:
+                max_retries = 2
             retry_delay = 5
             timeout = 40.0
             download_url: str | None = None

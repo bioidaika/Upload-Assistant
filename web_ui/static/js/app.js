@@ -272,6 +272,16 @@ const argumentCategories = [
     subtitle: "Getting these correct is 90% of a successful upload!",
     args: [
       {
+        label: "--poster",
+        placeholder: "URL_OR_PATH",
+        description: "Artwork URL or local poster path for any category",
+      },
+      {
+        label: "--banner",
+        placeholder: "URL_OR_PATH",
+        description: "Artwork URL or local banner path for any category",
+      },
+      {
         label: "--category",
         placeholder: "MOVIE",
         description: "Override detected category",
@@ -353,11 +363,6 @@ const argumentCategories = [
         label: "--music-genre",
         placeholder: "GENRE1,GENRE2",
         description: "Comma-separated genre override",
-      },
-      {
-        label: "--music-cover",
-        placeholder: "URL_OR_PATH",
-        description: "Artwork URL or local cover path",
       },
       {
         label: "--music-discogs-id",
@@ -554,11 +559,6 @@ const argumentCategories = [
         description: "Override detected book title",
       },
       {
-        label: "--book-cover",
-        placeholder: "PATH_OR_URL",
-        description: "Required BOOK cover image path or public image URL",
-      },
-      {
         label: "--book-overview",
         placeholder: "SYNOPSIS",
         description:
@@ -741,6 +741,29 @@ const argumentCategories = [
         label: "--exclusive",
         placeholder: "1",
         description: "Set exclusive flag where supported",
+      },
+      { label: "--featured", description: "Mark upload as Featured (UNIT3D)" },
+      {
+        label: "--double-upload",
+        description: "Mark upload as Double Upload (UNIT3D)",
+      },
+      {
+        label: "--double-upload-until",
+        placeholder: "N",
+        description: "Double upload duration in days (UNIT3D)",
+      },
+      {
+        label: "--freeleech-until",
+        placeholder: "N",
+        description: "Freeleech duration in days (UNIT3D)",
+      },
+      {
+        label: "--refundable",
+        description: "Mark upload as Refundable (UNIT3D)",
+      },
+      {
+        label: "--sticky",
+        description: "Mark upload as Sticky / pinned (UNIT3D)",
       },
     ],
   },
@@ -1218,6 +1241,22 @@ const SpinnerIcon = () => (
   </svg>
 );
 
+const RefreshIcon = () => (
+  <svg
+    className="w-4 h-4"
+    fill="none"
+    stroke="currentColor"
+    viewBox="0 0 24 24"
+  >
+    <path
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={2}
+      d="M20 11a8.1 8.1 0 00-14.8-4.5L3 9m0 0V4m0 5h5M4 13a8.1 8.1 0 0014.8 4.5L21 15m0 0v5m0-5h-5"
+    />
+  </svg>
+);
+
 const metadataProviderStyles = {
   tmdb: {
     light: "border-[#06B4E2] bg-transparent text-[#067A98]",
@@ -1411,6 +1450,8 @@ function AudionutsUAGUI() {
   const [trackers, setTrackers] = useState([]);
   const [defaultTrackers, setDefaultTrackers] = useState(new Set());
   const [selectedTrackers, setSelectedTrackers] = useState(new Set());
+  const [showAllSupportedTrackers, setShowAllSupportedTrackers] =
+    useState(false);
   const [failedFavicons, setFailedFavicons] = useState(new Set());
   const [isExecuting, setIsExecuting] = useState(false);
   const [isOutputExpanded, setIsOutputExpanded] = useState(false);
@@ -1457,6 +1498,8 @@ function AudionutsUAGUI() {
   const [canAddExecutionScreenshot, setCanAddExecutionScreenshot] =
     useState(false);
   const [screenshotActionId, setScreenshotActionId] = useState("");
+  const [coverAction, setCoverAction] = useState("");
+  const coverRequestRef = useRef(0);
   const [expandedScreenshot, setExpandedScreenshot] = useState(null);
   const themePaletteRef = useRef(null);
   const screenshotModalRef = useRef(null);
@@ -2057,6 +2100,17 @@ function AudionutsUAGUI() {
   const renderTrackerSelector = () => {
     if (!trackers || trackers.length === 0) return null;
 
+    const hasConfiguredMetadata = trackers.some(
+      (tracker) => typeof tracker.configured === "boolean",
+    );
+    const visibleTrackers =
+      showAllSupportedTrackers || !hasConfiguredMetadata
+        ? trackers
+        : trackers.filter(
+            (tracker) =>
+              tracker.configured || selectedTrackers.has(tracker.name),
+          );
+
     const getInitialsColor = (name) => {
       let hash = 0;
       for (let i = 0; i < name.length; i++) {
@@ -2082,53 +2136,77 @@ function AudionutsUAGUI() {
       <div
         className={`mt-3 space-y-2 p-3 rounded-lg border ${isDarkMode ? "bg-gray-900 border-gray-700 text-white" : "bg-gray-50 border-gray-200 text-gray-800"}`}
       >
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="text-xs font-semibold uppercase tracking-wider opacity-75">
             Select Trackers (-tk):
           </span>
-          <div className="flex gap-2">
-            <button
-              onClick={() => {
-                setSelectedTrackers(new Set(defaultTrackers));
-                setCustomArgs(
-                  syncTrackersToArgs(
-                    customArgs,
-                    defaultTrackers,
-                    defaultTrackers,
-                  ),
-                );
-              }}
-              className="text-[10px] text-purple-500 hover:text-purple-400 underline font-medium"
-              disabled={isExecuting}
-            >
-              Reset to Defaults
-            </button>
-            <button
-              onClick={() => {
-                const nextSet = new Set();
-                setSelectedTrackers(nextSet);
-                setCustomArgs(
-                  syncTrackersToArgs(customArgs, nextSet, defaultTrackers),
-                );
-              }}
-              className="text-[10px] text-purple-500 hover:text-purple-400 underline font-medium"
-              disabled={isExecuting}
-            >
-              Clear All
-            </button>
+          <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1">
+            <label className="inline-flex cursor-pointer items-center gap-1.5 text-[10px] font-medium">
+              <input
+                type="checkbox"
+                checked={showAllSupportedTrackers}
+                onChange={(event) =>
+                  setShowAllSupportedTrackers(event.target.checked)
+                }
+                className="h-3.5 w-3.5 accent-purple-600"
+                disabled={isExecuting}
+              />
+              <span>Show all supported trackers</span>
+            </label>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedTrackers(new Set(defaultTrackers));
+                  setCustomArgs(
+                    syncTrackersToArgs(
+                      customArgs,
+                      defaultTrackers,
+                      defaultTrackers,
+                    ),
+                  );
+                }}
+                className="text-[10px] text-purple-500 hover:text-purple-400 underline font-medium"
+                disabled={isExecuting}
+              >
+                Reset to Defaults
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const nextSet = new Set();
+                  setSelectedTrackers(nextSet);
+                  setCustomArgs(
+                    syncTrackersToArgs(customArgs, nextSet, defaultTrackers),
+                  );
+                }}
+                className="text-[10px] text-purple-500 hover:text-purple-400 underline font-medium"
+                disabled={isExecuting}
+              >
+                Clear All
+              </button>
+            </div>
           </div>
         </div>
         <div
           className={`flex flex-wrap gap-2 pr-1 ${!isExecuting && !isOutputExpanded ? "" : "max-h-48 overflow-y-auto"}`}
         >
-          {trackers.map((tracker) => {
+          {visibleTrackers.length === 0 && (
+            <span className="text-xs opacity-70">
+              No configured trackers. Turn on Show all supported trackers to
+              choose one.
+            </span>
+          )}
+          {visibleTrackers.map((tracker) => {
             const isSelected = selectedTrackers.has(tracker.name);
             const isDefault = defaultTrackers.has(tracker.name);
+            const isConfigured = tracker.configured !== false;
             const hasFavicon =
               tracker.favicon && !failedFavicons.has(tracker.name);
 
             return (
               <button
+                type="button"
                 key={tracker.name}
                 onClick={() => handleTrackerToggle(tracker.name)}
                 disabled={isExecuting}
@@ -2141,7 +2219,7 @@ function AudionutsUAGUI() {
                       ? "bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700 hover:text-gray-200"
                       : "bg-white border-gray-300 text-gray-600 hover:bg-gray-50 hover:text-gray-900"
                 }`}
-                title={`${tracker.display_name}${isDefault ? " (Default)" : ""}`}
+                title={`${tracker.display_name}${isDefault ? " (Default)" : ""}${!isConfigured ? " (Not configured)" : ""}`}
               >
                 {hasFavicon ? (
                   <img
@@ -2237,6 +2315,7 @@ function AudionutsUAGUI() {
   }, [hasDescFile, hasDescLink]);
 
   useEffect(() => {
+    coverRequestRef.current += 1;
     if (!isExecuting || !sessionId) {
       setExecutionPreview(null);
       setProgressItems([]);
@@ -2248,6 +2327,7 @@ function AudionutsUAGUI() {
       setDescriptionVersion(0);
       setDescriptionDirty(false);
       setCanAddExecutionScreenshot(false);
+      setCoverAction("");
       setExpandedScreenshot(null);
       setIsScreenshotReviewOpen(false);
       setIsDescriptionReviewOpen(false);
@@ -2353,6 +2433,11 @@ function AudionutsUAGUI() {
     };
   }, [API_BASE, isExecuting, sessionId]);
 
+  useEffect(() => {
+    coverRequestRef.current += 1;
+    setCoverAction("");
+  }, [executionPreview?.media_id]);
+
   const refreshExecutionScreenshots = async () => {
     const refreshed = await apiFetch(
       `${API_BASE}/execution_screenshots?session_id=${encodeURIComponent(sessionId)}`,
@@ -2389,6 +2474,40 @@ function AudionutsUAGUI() {
       window.alert(`Could not ${action} screenshot. Please try again.`);
     } finally {
       setScreenshotActionId("");
+    }
+  };
+
+  const regenerateExecutionCover = async () => {
+    const mediaId = executionPreview?.media_id;
+    if (!sessionId || !mediaId || coverAction) return;
+    const requestToken = ++coverRequestRef.current;
+    setCoverAction("regenerate");
+    try {
+      const response = await apiFetch(
+        `${API_BASE}/execution_preview_cover/regenerate`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: sessionId, media_id: mediaId }),
+        },
+      );
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data?.success) {
+        window.alert(data?.error || "Could not regenerate the XXX cover.");
+        return;
+      }
+      if (coverRequestRef.current === requestToken) {
+        setExecutionPreview((previous) =>
+          previous?.media_id === mediaId
+            ? { ...previous, poster_url: data.poster_url }
+            : previous,
+        );
+      }
+    } catch (error) {
+      console.error("Could not regenerate XXX cover:", error);
+      window.alert("Could not regenerate the XXX cover. Please try again.");
+    } finally {
+      if (coverRequestRef.current === requestToken) setCoverAction("");
     }
   };
 
@@ -4705,13 +4824,40 @@ function AudionutsUAGUI() {
           >
             {media?.poster_url ? (
               <div
-                className={`w-full ${posterHeight} flex items-center justify-center p-3 ${isDarkMode ? "bg-gray-950" : "bg-stone-100"}`}
+                className={`w-full ${posterHeight} flex items-center justify-center gap-3 p-3 ${isDarkMode ? "bg-gray-950" : "bg-stone-100"}`}
               >
-                <img
-                  src={media.poster_url}
-                  alt={previewTitle}
-                  className="max-w-full max-h-full object-contain"
-                />
+                <div className="min-w-0 h-full flex-1 flex items-center justify-center">
+                  <img
+                    src={media.poster_url}
+                    alt={previewTitle}
+                    className="max-w-full max-h-full object-contain"
+                  />
+                </div>
+                {category === "XXX" &&
+                  String(media.poster_url).startsWith(
+                    "/api/execution_preview_cover?",
+                  ) && (
+                    <button
+                      type="button"
+                      onClick={regenerateExecutionCover}
+                      disabled={Boolean(coverAction)}
+                      aria-label={
+                        coverAction === "regenerate"
+                          ? "Generating a new XXX cover"
+                          : "Generate a new XXX cover"
+                      }
+                      className={`flex-shrink-0 inline-flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-semibold transition-colors disabled:cursor-wait disabled:opacity-60 ${isDarkMode ? "bg-purple-700 text-white hover:bg-purple-600" : "bg-purple-600 text-white hover:bg-purple-700"}`}
+                      title="Generate another cover from a different video frame"
+                    >
+                      <span aria-hidden="true">
+                        {coverAction === "regenerate" ? (
+                          <SpinnerIcon />
+                        ) : (
+                          <RefreshIcon />
+                        )}
+                      </span>
+                    </button>
+                  )}
               </div>
             ) : (
               <div

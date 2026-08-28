@@ -29,9 +29,11 @@
   - [Step 4: Configure the Assistant](#step-4-configure-the-assistant)
 - [Updating](#updating)
 - [CLI Usage](#cli-usage)
+- [Shell Completions](docs/shell-completions.md)
 - [Docker Usage](#docker-usage)
 - [Seedbox / Linux Install](docs/seedbox.md)
 - [Attributions](#attributions)
+- [Contributors](#contributors)
 
 ## Fork Features & Differences from Upstream (Audionut/Upload-Assistant)
 
@@ -102,18 +104,20 @@ This branch introduces new media categories and automation features not present 
 
 |                                                                                            | Site                   | Usage                  | Supported Categories         |
 | ------------------------------------------------------------------------------------------ | ---------------------- | ---------------------- | ---------------------------- |
+| <img src="web_ui/static/img/trackers/1ptba.png" width="16" height="16" />                  | 1PTBA                  | 1PTBA                  | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/aither.png" width="16" height="16" />                 | Aither                 | AITHER                 | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/alpharatio.png" width="16" height="16" />             | Alpharatio             | ALPHARATIO             | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/amigosshare.png" width="16" height="16" />            | Amigos-Share           | AMIGOSSHARE            | MOVIE, TV, BOOK, GAME        |
 | <img src="web_ui/static/img/trackers/anthelion.png" width="16" height="16" />              | Anthelion              | ANTHELION              | MOVIE                        |
 | <img src="web_ui/static/img/trackers/asiancinema.png" width="16" height="16" />            | AsianCinema            | ASIANCINEMA            | MOVIE, TV                    |
-| <img src="web_ui/static/img/trackers/aura4k.png" width="16" height="16" />                 | Aura4K                 | AURA4K                 | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/avistaz.png" width="16" height="16" />                | AvistaZ                | AVISTAZ                | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/beyondhd.png" width="16" height="16" />               | Beyond-HD              | BEYONDHD               | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/bithdtv.png" width="16" height="16" />                | BitHDTV                | BITHDTV                | MOVIE, TV                    |
+| <img src="web_ui/static/img/trackers/bitporn.png" width="16" height="16" />                | BitPorn                | BITPORN                | XXX                          |
 | <img src="web_ui/static/img/trackers/blutopia.png" width="16" height="16" />               | Blutopia               | BLUTOPIA               | MOVIE, TV                    |
-| <img src="web_ui/static/img/trackers/bjshare.png" width="16" height="16" />                | BrasilJapão-Share      | BJSHARE                | MOVIE, TV, BOOK, GAME        |
+| <img src="web_ui/static/img/trackers/bjshare.png" width="16" height="16" />                | BrasilJapão-Share      | BJSHARE                | MOVIE, TV, BOOK, GAME, XXX   |
 | <img src="web_ui/static/img/trackers/brasiltracker.png" width="16" height="16" />          | BrasilTracker          | BRASILTRACKER          | MOVIE, TV, BOOK, GAME        |
+| <img src="web_ui/static/img/trackers/broadcasthenet.png" width="16" height="16" />         | BroadcasTheNet         | BROADCASTHENET         | TV                           |
 | <img src="web_ui/static/img/trackers/capybarabr.png" width="16" height="16" />             | CapybaraBR             | CAPYBARABR             | MOVIE, TV, BOOK, GAME        |
 | <img src="web_ui/static/img/trackers/cathoderaytube.png" width="16" height="16" />         | Cathode-Ray.Tube       | CATHODERAYTUBE         | MOVIE, TV, GAME              |
 | <img src="web_ui/static/img/trackers/cinematik.png" width="16" height="16" />              | Cinematik              | CINEMATIK              | MOVIE, TV                    |
@@ -121,8 +125,10 @@ This branch introduces new media categories and automation features not present 
 | <img src="web_ui/static/img/trackers/darkpeers.png" width="16" height="16" />              | DarkPeers              | DARKPEERS              | MOVIE, TV, BOOK, GAME, MUSIC |
 | <img src="web_ui/static/img/trackers/desitorrents.png" width="16" height="16" />           | DesiTorrents           | DESITORRENTS           | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/digitalcore.png" width="16" height="16" />            | DigitalCore            | DIGITALCORE            | MOVIE, TV, BOOK, GAME, MUSIC |
+| <img src="web_ui/static/img/trackers/dreadvault.png" alt="" width="16" height="16" />      | DreadVault             | DREADVAULT             | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/emuwarez.png" width="16" height="16" />               | Emuwarez               | EMUWAREZ               | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/filelist.png" width="16" height="16" />               | FileList               | FILELIST               | MOVIE, TV                    |
+| <img src="web_ui/static/img/trackers/flood.png" width="16" height="16" />                  | Flood                  | FLOOD                  | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/funfile.png" width="16" height="16" />                | FunFile                | FUNFILE                | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/greatposterwall.png" width="16" height="16" />        | GreatPosterWall        | GREATPOSTERWALL        | MOVIE                        |
 | <img src="web_ui/static/img/trackers/hawkeuno.png" width="16" height="16" />               | hawke-uno              | HAWKEUNO               | MOVIE, TV                    |
@@ -135,11 +141,12 @@ This branch introduces new media categories and automation features not present 
 | <img src="web_ui/static/img/trackers/iptorrents.png" width="16" height="16" />             | IPTorrents             | IPTORRENTS             | MOVIE, TV, BOOK, GAME, MUSIC |
 | <img src="web_ui/static/img/trackers/itatorrents.png" width="16" height="16" />            | ItaTorrents            | ITATORRENTS            | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/lajidui.png" width="16" height="16" />                | lajidui                | LAJIDUI                | MOVIE, TV                    |
+| <img src="web_ui/static/img/trackers/lemonhd.png" width="16" height="16" />                | LemonHD                | LEMONHD                | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/lastdigitalunderground.png" width="16" height="16" /> | LastDigitalUnderground | LASTDIGITALUNDERGROUND | MOVIE, TV, BOOK              |
 | <img src="web_ui/static/img/trackers/latteam.png" width="16" height="16" />                | Lat-Team               | LATTEAM                | MOVIE, TV, BOOK              |
 | <img src="web_ui/static/img/trackers/locadora.png" width="16" height="16" />               | Locadora               | LOCADORA               | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/longpt.png" width="16" height="16" />                 | LongPT                 | LONGPT                 | MOVIE, TV                    |
-| <img src="web_ui/static/img/trackers/lst.png" width="16" height="16" />                    | LST                    | LST                    | MOVIE, TV, BOOK, MUSIC       |
+| <img src="web_ui/static/img/trackers/lst.png" width="16" height="16" />                    | LST                    | LST                    | MOVIE, TV, BOOK, MUSIC, XXX  |
 | <img src="web_ui/static/img/trackers/luminarr.png" width="16" height="16" />               | Luminarr               | LUMINARR               | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/makingoff.png" width="16" height="16" />              | MakingOff              | MAKINGOFF              | MOVIE                        |
 | <img src="web_ui/static/img/trackers/midnightscene.png" width="16" height="16" />          | MidnightScene          | MIDNIGHTSCENE          | MOVIE, TV, GAME, MUSIC       |
@@ -155,6 +162,7 @@ This branch introduces new media categories and automation features not present 
 | <img src="web_ui/static/img/trackers/portugas.png" width="16" height="16" />               | Portugas               | PORTUGAS               | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/privatehd.png" width="16" height="16" />              | PrivateHD              | PRIVATEHD              | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/ptgtk.png" width="16" height="16" />                  | PT GTK                 | PTGTK                  | MOVIE, TV                    |
+| <img src="web_ui/static/img/trackers/ptzone.png" width="16" height="16" />                 | PTZone                 | PTZONE                 | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/ptcafe.png" width="16" height="16" />                 | ptcafe                 | PTCAFE                 | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/pterclub.png" width="16" height="16" />               | PTerClub               | PTERCLUB               | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/ptfans.png" width="16" height="16" />                 | PTFans                 | PTFANS                 | MOVIE, TV                    |
@@ -165,6 +173,7 @@ This branch introduces new media categories and automation features not present 
 | <img src="web_ui/static/img/trackers/reelflix.png" width="16" height="16" />               | ReelFLiX               | REELFLIX               | MOVIE                        |
 | <img src="web_ui/static/img/trackers/retroflix.png" width="16" height="16" />              | RetroFlix              | RETROFLIX              | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/retromoviesclub.png" width="16" height="16" />        | RetroMoviesClub        | RETROMOVIESCLUB        | MOVIE                        |
+| <img src="web_ui/static/img/trackers/rockethd.png" width="16" height="16" />               | RocketHD               | ROCKETHD               | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/samaritano.png" width="16" height="16" />             | Samaritano             | SAMARITANO             | MOVIE, TV, BOOK, GAME        |
 | <img src="web_ui/static/img/trackers/seedpool.png" width="16" height="16" />               | seedpool               | SEEDPOOL               | MOVIE, TV, BOOK, GAME, MUSIC |
 | <img src="web_ui/static/img/trackers/shareisland.png" width="16" height="16" />            | ShareIsland            | SHAREISLAND            | MOVIE, TV                    |
@@ -178,6 +187,7 @@ This branch introduces new media categories and automation features not present 
 | <img src="web_ui/static/img/trackers/torrentleech.png" width="16" height="16" />           | TorrentLeech           | TORRENTLEECH           | MOVIE, TV, BOOK, GAME, MUSIC |
 | <img src="web_ui/static/img/trackers/totheglory.png" width="16" height="16" />             | ToTheGlory             | TOTHEGLORY             | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/tvchaosuk.png" width="16" height="16" />              | TVChaosUK              | TVCHAOSUK              | MOVIE, TV                    |
+| <img src="web_ui/static/img/trackers/xingyungept.png" width="16" height="16" />            | XingyungePT            | XINGYUNGEPT            | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/ulcx.png" width="16" height="16" />                   | ULCX                   | ULCX                   | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/utopia.png" width="16" height="16" />                 | UTOPIA                 | UTOPIA                 | MOVIE, TV                    |
 |                                                                                            | VietMediaF             | VMF                    | MOVIE, TV                    |
@@ -189,10 +199,11 @@ This branch introduces new media categories and automation features not present 
 <details>
 <summary><strong>Click to view Supported Usenet Indexers</strong></summary>
 
-|                                                                                 | Site        | Usage       | Supported Categories  |
-| ------------------------------------------------------------------------------- | ----------- | ----------- | --------------------- |
-| <img src="web_ui/static/img/trackers/curupira.png" width="16" height="16" />    | Curupira    | CURUPIRA    | MOVIE, TV, BOOK, GAME |
-| <img src="web_ui/static/img/trackers/drunkenslug.png" width="16" height="16" /> | DrunkenSlug | DRUNKENSLUG | MOVIE, TV, BOOK, GAME |
+|                                                                                 | Site        | Usage       | Supported Categories         |
+| ------------------------------------------------------------------------------- | ----------- | ----------- | ---------------------------- |
+| <img src="web_ui/static/img/trackers/curupira.png" width="16" height="16" />    | Curupira    | CURUPIRA    | MOVIE, TV, BOOK, GAME        |
+| <img src="web_ui/static/img/trackers/drunkenslug.png" width="16" height="16" /> | DrunkenSlug | DRUNKENSLUG | MOVIE, TV, BOOK, GAME        |
+| <img src="web_ui/static/img/trackers/nzbgeek.png" width="16" height="16" />     | NZBGeek     | NZBGEEK     | MOVIE, TV, BOOK, GAME, MUSIC |
 
 </details>
 
@@ -210,11 +221,34 @@ For a manual Linux/macOS/Windows installation, Upload Assistant needs a few tool
    - Download and install it from the [official Python website](https://www.python.org/downloads/).
 2. **MediaInfo & FFmpeg**:
    - These are helper tools used to scan files and generate screenshots/spectrograms.
-   - Install them using your system's software manager:
-     - Debian/Ubuntu: `sudo apt install mediainfo ffmpeg`
-     - Arch Linux: `sudo pacman -S mediainfo ffmpeg`
-     - RedHat/Fedora: `sudo dnf install mediainfo ffmpeg`
+   - The official MediaInfo CLI is downloaded and checksum-verified automatically on supported Windows, Linux, and macOS systems. Android/Termux uses its native `mediainfo` package (`pkg install mediainfo`).
+   - Install FFmpeg using your system's software manager:
+     - Debian/Ubuntu: `sudo apt install ffmpeg`
+     - Arch Linux: `sudo pacman -S ffmpeg`
+     - RedHat/Fedora: `sudo dnf install ffmpeg`
    - _Having issues with FFmpeg? Check out our [FFmpeg troubleshooting guide](docs/ffmpeg-max-workers-issues.md)._
+
+---
+
+### Install from PyPI with `uv` (Windows, Linux, or macOS)
+
+The recommended command-line installation uses the published PyPI package. It automatically manages the virtual environment and exposes the `ua` and `ua-config` commands on your system path:
+
+```bash
+uv tool install upload-assistant
+```
+
+If `uv` reports that its tool directory is not on your `PATH`, run `uv tool update-shell`, then open a new terminal.
+
+### Install the latest development version with `uv`
+
+If you have [uv](https://github.com/astral-sh/uv) installed, you can install Upload Assistant directly from the repository as a globally available standalone CLI tool. This automatically manages the virtual environment and exposes the `ua` and `ua-config` commands directly to your system path. This method resolves dependencies from `pyproject.toml`; skip Steps 2 and 3 below.
+
+```bash
+uv tool install git+https://github.com/wastaken7/Upload-Assistant.git
+```
+
+If `uv` reports that its tool directory is not on your `PATH`, run `uv tool update-shell`, then open a new terminal.
 
 ---
 
@@ -282,17 +316,27 @@ If you plan to use the Web UI, **your configuration file will be generated autom
 In your terminal, run the command for your operating system and follow the on-screen prompts:
 
 - **Windows:** Install with the [`.exe` installer](docs/windows-install.md), then run `ua-config` in a new terminal.
-- **Linux / macOS:**
+- **Linux / macOS (Standard):**
 
   ```bash
   python3 config-generator.py
   ```
 
+- **Linux / macOS (uv installation):**
+
+  ```bash
+  ua-config
+  ```
+
 #### Method C: Manual Configuration
 
-1. Go to the `data/` folder inside the project.
-2. Copy `example_config.py` and rename the copy to `config.py` (leave the original `example_config.py` file as-is).
-3. Open `config.py` in a text editor (like Notepad, VS Code, or TextEdit) and fill in your information.
+1. Create the user-state `data` directory if it does not already exist:
+   - **Windows:** `%LOCALAPPDATA%\Upload-Assistant\data`
+   - **Linux / macOS:** `$XDG_DATA_HOME/Upload-Assistant/data` (normally `~/.local/share/Upload-Assistant/data`)
+   - **Custom location:** `%UA_DATA_DIR%\data` (Windows Command Prompt), `$env:UA_DATA_DIR\data` (PowerShell), or `$UA_DATA_DIR/data` (Linux/macOS) when `UA_DATA_DIR` is set
+2. **For source checkouts (git clone / ZIP download):** Copy the bundled `data/example_config.py` from the project into that directory as `config.py` (leave the original file unchanged).
+   **For PyPI, uv, or Windows .exe installs:** Run `ua-config` to generate the config file first, which will create `config.py` in the user-state directory.
+3. Open the user-state `config.py` in a text editor (like Notepad, VS Code, or TextEdit) and fill in your information.
    - For detailed info on what each setting does, see [Example Config Docs](docs/example-config.md).
    - Get a free TMDb API key from [TheMovieDB API settings](https://www.themoviedb.org/settings/api).
 
@@ -303,7 +347,7 @@ In your terminal, run the command for your operating system and follow the on-sc
 - Check out our [Wiki Help Page](docs/home.md).
 - Windows installation and basic commands: see [Windows Install](docs/windows-install.md).
 - Need a no-root Linux or seedbox setup? See [Seedbox / Linux Install](docs/seedbox.md).
-- Found an issue or need help? Please [open a GitHub Issue](https://github.com/wastaken7/Upload-Assistant/issues) so we can track and resolve it.
+- Found an issue or need help? Please [open a GitHub Issue](https://github.com/wastaken7/Upload-Assistant/issues) so we can track and resolve it. If you prefer not to create a GitHub account for privacy reasons, join our [Signal group](https://signal.group/#CjQKILmkUCLe5mZULkQGI6B5knmX1ytrIBFicpJ_NZGAHmOrEhDD5F7ctp-obLeLOsa0yCoJ) instead.
 
 ## **Updating:**
 
@@ -316,23 +360,24 @@ In your terminal, run the command for your operating system and follow the on-sc
 
 - Or, if you downloaded the ZIP file, download a fresh ZIP from GitHub and overwrite your existing files.
 - For the Windows installation, run `ua-update`.
+- For the `uv` standalone installation, run: `uv tool upgrade upload-assistant`
 - Run the command to update dependencies:
   - **Linux / macOS:** `python3 -m pip install --user -U -r requirements.txt`
 - Run the configuration generator to fetch any new settings:
-  - **Windows:** run `ua-config` from any folder.
-  - **Linux / macOS:** `python3 config-generator.py`
+  - **Windows / uv installations:** run `ua-config` from any folder.
+  - **Linux / macOS (Standard):** `python3 config-generator.py`
 
 ## **CLI Usage:**
 
 To run the assistant, use the command for your system:
 
-- **Windows:**
+- **Windows / uv installations:**
 
   ```cmd
-  ua "C:\path\to\content" --args
+  ua "/path/to/content" --args
   ```
 
-- **Linux / macOS:**
+- **Linux / macOS (Standard):**
 
   ```bash
   python3 upload.py "/path/to/content" --args
@@ -374,3 +419,6 @@ Features automated binary managers for:
   <a href="https://thetvdb.com/"><img src="https://i.postimg.cc/Hs1KKqsS/logo1.png" alt="TheTVDB" height="40px;"></a>&nbsp;&nbsp;
   <a href="https://www.tvmaze.com/"><img src="https://i.postimg.cc/2jdRzkJp/tvm-header-logo.png" alt="TVmaze" height="40px"></a>
 </p>
+
+## **Contributors:**
+[![Contributors](https://contrib.rocks/image?repo=wastaken7/Upload-Assistant)](https://github.com/wastaken7/Upload-Assistant/graphs/contributors)

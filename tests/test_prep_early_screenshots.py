@@ -7,8 +7,9 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from src import prep_helpers
 from src.meta import Meta
-from src.prep import Prep
+from src.prep import Prep, populate_hdr_for_early_capture
 from src.screenshot_manifest import register
 from src.takescreens import screenshots
 from src.uploadscreens import _upload_screens
@@ -52,6 +53,59 @@ def test_early_screenshots_remain_enabled_without_description_images() -> None:
     assert screenshot_spy.calls[0][1]["capture_group"] == "main"
 
 
+def test_early_capture_populates_hdr_before_category_detection(monkeypatch) -> None:
+    meta = Meta(category="")
+
+    async def hdr_stub(mi, bdinfo):
+        assert mi == {"media": {"track": []}}
+        assert bdinfo == {}
+        return "HDR"
+
+    monkeypatch.setattr("src.prep.prep_helpers.video_manager.get_hdr", hdr_stub)
+
+    asyncio.run(populate_hdr_for_early_capture(meta, {"media": {"track": []}}, {}))
+
+    assert meta.hdr == "HDR"
+
+
+def test_early_capture_skips_hdr_probe_without_video_metadata() -> None:
+    meta = Meta(category="BOOK")
+
+    asyncio.run(populate_hdr_for_early_capture(meta, None, None))
+
+    assert meta.hdr == ""
+
+
+def test_personal_release_config_skips_auto_torrent_before_client_search(tmp_path: Path) -> None:
+    prep = Prep.__new__(Prep)
+    prep.config = {"DEFAULT": {"skip_auto_torrent_personalrelease": True}}
+    meta = Meta(base_dir=str(tmp_path), path=str(tmp_path), personalrelease=True)
+
+    prep_helpers.init_meta(prep, meta, "cli")
+
+    assert meta.skip_auto_torrent
+
+
+def test_frame_overlay_config_is_set_before_early_capture(tmp_path: Path) -> None:
+    prep = Prep.__new__(Prep)
+    prep.config = {"DEFAULT": {"frame_overlay": True}}
+    meta = Meta(base_dir=str(tmp_path), path=str(tmp_path))
+
+    prep_helpers.init_meta(prep, meta, "cli")
+
+    assert meta.frame_overlay is True
+
+
+def test_forbidden_tracker_defers_frame_overlay_capture() -> None:
+    prep, screenshot_spy = _prep_with_screenshot_spy()
+    prep.config["TRACKERS"] = {"default_trackers": "AVISTAZ"}
+    meta = Meta(category="MOVIE", keep_images=False, screens=6, frame_overlay=True)
+
+    asyncio.run(prep._capture_early_screenshots(meta, "Release", "C:/media/Release.mkv", {}))
+
+    assert screenshot_spy.calls == []
+
+
 def test_registered_main_screenshots_are_reused_when_title_changes(tmp_path: Path) -> None:
     release_id = "release"
     screenshot_dir = tmp_path / "tmp" / release_id / "screenshots"
@@ -68,6 +122,50 @@ def test_registered_main_screenshots_are_reused_when_title_changes(tmp_path: Pat
         result = asyncio.run(screenshots("unused.mkv", "Punctuated, Title", release_id, str(tmp_path), meta, manual_frames=[100, 200]))
 
     assert set(result or []) == {str(path) for path in registered}
+
+
+def test_pack_capture_ignores_uploaded_images_from_main_group(tmp_path: Path) -> None:
+    release_id = "release"
+    release_dir = tmp_path / "tmp" / release_id
+    release_dir.mkdir(parents=True)
+    (release_dir / "MediaInfo.json").write_text(
+        '{"media": {"track": [{"Duration": "100"}, {"Duration": "100", "Width": "1920", "Height": "1080", "PixelAspectRatio": "1", "DisplayAspectRatio": "1.777", "FrameRate": "24"}]}}',
+        encoding="utf-8",
+    )
+    meta = Meta(
+        category="MOVIE",
+        base_dir=str(tmp_path),
+        uuid=release_id,
+        screens=2,
+        imghost="imgbb",
+        image_list=[{"img_url": "https://images.example/main.png"}],
+    )
+    capture_calls: list[object] = []
+
+    async def capture_stub(args: tuple[object, ...]):
+        capture_calls.append(args)
+        output = Path(str(args[3]))
+        output.write_bytes(b"image")
+        return args[0], str(output)
+
+    with (
+        patch("src.takescreens.get_image_host", new=AsyncMock(return_value="imgbb")),
+        patch("src.takescreens.capture_screenshot", new=capture_stub),
+    ):
+        result = asyncio.run(
+            screenshots(
+                "unused.mkv",
+                "FILE_1",
+                release_id,
+                str(tmp_path),
+                meta,
+                manual_frames=[100, 200],
+                capture_group="FILE_1",
+            )
+        )
+
+    assert len(capture_calls) == 2
+    assert len(result or []) == 2
 
 
 def test_partial_registered_group_captures_only_missing_screenshots(tmp_path: Path) -> None:
@@ -167,7 +265,7 @@ def test_upload_uses_only_registered_main_screenshots(tmp_path: Path, monkeypatc
         _, uploaded_count = asyncio.run(_upload_screens(config, meta, 1, 1, 0, 1, [], {}))
 
     assert uploaded_count == 1
-    assert calls == [main_screen.name]
+    assert calls == [str(main_screen)]
 
 
 def test_early_bdmv_capture_includes_alternate_playlists() -> None:
@@ -201,3 +299,48 @@ def test_early_bdmv_capture_includes_extra_discs() -> None:
 
     assert len(screenshot_spy.calls) == 2
     assert screenshot_spy.calls[1][0][-1] == "FILE_1"
+
+
+def test_early_capture_returns_meta_with_tonemapping() -> None:
+    prep = Prep.__new__(Prep)
+
+    class _TonemappingTakeScreens:
+        async def screenshots(self, *_args: object, **kwargs: object) -> None:
+            meta_arg = _args[4] if len(_args) > 4 else kwargs.get("meta")
+            if isinstance(meta_arg, Meta):
+                meta_arg.tonemapped = True
+                meta_arg.libplacebo = True
+
+    prep.takescreens_manager = _TonemappingTakeScreens()
+    prep.config = {"DEFAULT": {"multiScreens": 2}}
+    meta = Meta(category="MOVIE", keep_images=False, screens=6, hdr="HDR")
+
+    result = asyncio.run(prep._capture_early_screenshots(meta, "Release", "C:/media/Release.mkv", {}))
+
+    assert result is not None
+    assert result.tonemapped is True
+    assert result.libplacebo is True
+
+
+def test_screenshots_sets_tonemapped_when_reusing_existing_screenshots(tmp_path: Path) -> None:
+    release_id = "release_tonemap"
+    release_dir = tmp_path / "tmp" / release_id
+    screenshot_dir = release_dir / "screenshots"
+    screenshot_dir.mkdir(parents=True)
+    (release_dir / "MediaInfo.json").write_text(
+        '{"media": {"track": [{"Duration": "100"}, {"Duration": "100", "Width": "1920", "Height": "1080", "PixelAspectRatio": "1", "DisplayAspectRatio": "1.777", "FrameRate": "24"}]}}',
+        encoding="utf-8",
+    )
+    for index in range(2):
+        image = screenshot_dir / f"title-{index}.png"
+        image.write_bytes(b"image")
+    meta = Meta(category="MOVIE", base_dir=str(tmp_path), uuid=release_id, screens=2, hdr="HDR10", imghost="imgbb")
+
+    with (
+        patch("src.takescreens.tone_map", True),
+        patch("src.takescreens.get_image_host", new=AsyncMock(return_value="imgbb")),
+    ):
+        result = asyncio.run(screenshots("unused.mkv", "title", release_id, str(tmp_path), meta, num_screens=2))
+
+    assert len(result or []) == 2
+    assert meta.tonemapped is True

@@ -50,6 +50,20 @@ def test_new_audiobook_formats_are_detected(extension, tmp_path):
     assert meta.audiobook is True
 
 
+def test_audiobook_uses_audio_file_when_pdf_is_larger(tmp_path):
+    pdf = tmp_path / "book.pdf"
+    audiobook = tmp_path / "book.m4b"
+    pdf.write_bytes(b"x" * 100)
+    audiobook.write_bytes(b"audio")
+
+    meta = Meta()
+    videopath, filelist, _, _ = resolve_book_filelist(meta, str(tmp_path))
+
+    assert videopath == str(audiobook.resolve())  # noqa: S101
+    assert filelist == [str(audiobook.resolve()), str(pdf.resolve())]  # noqa: S101
+    assert meta.audiobook is True  # noqa: S101
+
+
 def test_text_sidecars_are_excluded_when_a_richer_book_format_exists(tmp_path):
     book = tmp_path / "book.epub"
     readme = tmp_path / "README.txt"
@@ -63,3 +77,22 @@ def test_text_sidecars_are_excluded_when_a_richer_book_format_exists(tmp_path):
 
     assert videopath == str(book.resolve())
     assert filelist == [str(book.resolve())]
+
+
+def test_map_audiobook_keywords():
+    from src.genre_map import map_audiobook_keywords
+
+    # PT-BR compound genre
+    assert map_audiobook_keywords("Ação e Aventura") == ["ação", "aventura"]
+    assert map_audiobook_keywords("22. Ação e Aventura") == ["ação", "aventura"]
+
+    # English compound genre
+    assert map_audiobook_keywords("Action & Adventure") == ["action", "adventure"]
+    assert map_audiobook_keywords("Science Fiction & Fantasy") == ["science fiction", "fantasy"]
+
+    # Multiple genres in list
+    assert map_audiobook_keywords(["Ação e Aventura", "Romance"]) == ["ação", "aventura", "romance"]
+
+    # Fallback to original cleaned genre when not in map
+    assert map_audiobook_keywords("Custom Unmapped Genre") == ["custom unmapped genre"]
+    assert map_audiobook_keywords("Custom Genre A; Custom Genre B") == ["custom genre a", "custom genre b"]

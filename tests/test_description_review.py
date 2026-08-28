@@ -1,12 +1,41 @@
 # ruff: noqa: S101
 
 import asyncio
+import inspect
 import json
 
 from src.description_review import load_review
 from src.get_desc import DescriptionBuilder, gen_desc
 from src.meta import Meta
+from src.trackers.UNIT3D import UNIT3D
 from web_ui import server
+
+
+def test_description_section_controls_default_to_true():
+    controls = (
+        "audio_spectrogram",
+        "bluray",
+        "book",
+        "custom_header",
+        "custom_signature",
+        "description",
+        "game",
+        "languages",
+        "logo",
+        "mediainfo",
+        "menu_screenshots",
+        "nfo",
+        "screenshots",
+        "tonemapped_header",
+        "tv_info",
+        "ua_signature",
+        "user_description",
+        "music",
+        "dynamic_hdr_plot",
+    )
+    parameters = inspect.signature(DescriptionBuilder.general_description_generator).parameters
+
+    assert all(parameters[control].default is True for control in controls)
 
 
 def test_webui_description_api_saves_an_execution_scoped_override(tmp_path, monkeypatch):
@@ -101,7 +130,48 @@ def test_description_file_is_not_rendered_twice_when_both_sections_are_enabled(t
             book=False,
             custom_header=False,
             custom_signature=False,
-            description=True,
+            game=False,
+            logo=False,
+            mediainfo=False,
+            menu_screenshots=False,
+            nfo=False,
+            screenshots=False,
+            tonemapped_header=False,
+            tv_info=False,
+            ua_signature=False,
+        )
+
+        assert result == "release notes"
+
+    asyncio.run(run())
+
+
+def test_unit3d_omits_scene_nfo_from_description_but_keeps_attachment(tmp_path):
+    async def run():
+        temp_dir = tmp_path / "tmp" / "release"
+        temp_dir.mkdir(parents=True)
+        nfo_content = "scene nfo content"
+        (temp_dir / "release.nfo").write_text(nfo_content, encoding="utf-8")
+        meta = Meta(
+            {
+                "base_dir": str(tmp_path),
+                "uuid": "release",
+                "auto_nfo": True,
+                "nfo": True,
+                "description_nfo_content": nfo_content,
+                "description": f"[center][spoiler=Scene NFO:][code]{nfo_content}[/code][/spoiler][/center]\nRelease notes",
+            }
+        )
+        config = {"DEFAULT": {}, "TRACKERS": {"UNIT3D": {}}}
+        builder = DescriptionBuilder("UNIT3D", config)
+
+        description = await builder.general_description_generator(
+            meta,
+            audio_spectrogram=False,
+            bluray=False,
+            book=False,
+            custom_header=False,
+            custom_signature=False,
             game=False,
             languages=False,
             logo=False,
@@ -112,9 +182,13 @@ def test_description_file_is_not_rendered_twice_when_both_sections_are_enabled(t
             tonemapped_header=False,
             tv_info=False,
             ua_signature=False,
-            user_description=True,
+            user_description=False,
+            music=False,
+            dynamic_hdr_plot=False,
         )
+        files = await UNIT3D(config, "UNIT3D").get_additional_files(meta)
 
-        assert result == "release notes"
+        assert description == "Release notes"
+        assert files["nfo"] == ("nfo_file.nfo", nfo_content.encode(), "text/plain")
 
     asyncio.run(run())

@@ -19,9 +19,8 @@ from src.get_desc import DescriptionBuilder
 from src.manualpackage import ManualPackageManager
 from src.meta import Meta
 from src.qbitwait import Wait
-from src.rehostimages import check_tracker_image_hosts
+from src.rehostimages import check_tracker_image_hosts, has_restricted_image_hosts, select_common_image_host
 from src.trackers.passthepopcorn import PassThePopcorn
-from src.trackers.torrenthr import TorrentHR
 from src.trackersetup import TrackerSetup
 
 type StatusDict = dict[str, Any]
@@ -32,7 +31,6 @@ async def check_mod_q_and_draft(
     meta: Meta,
 ) -> tuple[str | None, str | None, dict[str, Any]]:
     tracker_capabilities = {
-        "AURA4K": {"mod_q": True, "draft": False},
         "AITHER": {"mod_q": True, "draft": False},
         "BEYONDHD": {"draft_live": True},
         "BLUTOPIA": {"mod_q": True, "draft": False},
@@ -74,6 +72,21 @@ async def process_trackers(
     tracker_setup = TrackerSetup(config=config)
     tracker_setup_any = cast(Any, tracker_setup)
     enabled_trackers = list(cast(Sequence[str], tracker_setup_any.trackers_enabled(meta)))
+    if config.get("DEFAULT", {}).get("smart_image_host_selection", True) and not meta.imghost_from_cli:
+        manual_targets = "MANUAL" in enabled_trackers
+        target_trackers = [
+            tracker
+            for tracker in enabled_trackers
+            if tracker != "MANUAL" and (manual_targets or bool(cast(Mapping[str, Any], meta.tracker_status.get(tracker, {})).get("upload", False)))
+        ]
+        selected_host = select_common_image_host(config["DEFAULT"], target_trackers, tracker_class_map)
+        if selected_host:
+            current_host = str(meta.imghost or config["DEFAULT"].get("img_host_1", "")).strip().lower()
+            meta.imghost = selected_host
+            if selected_host != current_host:
+                logger.info(f"[green]Smart image-host selection changed the target host: {current_host or 'unset'} -> {selected_host}[/green]")
+        elif has_restricted_image_hosts(target_trackers, tracker_class_map):
+            logger.info("[yellow]No shared approved image host found; using per-tracker image-host selection.[/yellow]")
     manual_packager = ManualPackageManager(config)
     tracker_label_width = max(
         (len(str(tracker).replace(" ", "").upper().strip()) for tracker in enabled_trackers),
@@ -140,7 +153,7 @@ async def process_trackers(
         """
 
         tracker_class: Any = None
-        if tracker not in {"MANUAL", "TORRENTHR", "PASSTHEPOPCORN"}:
+        if tracker not in {"MANUAL", "PASSTHEPOPCORN"}:
             tracker_class = tracker_class_map[tracker](config=config)
         if meta.name.endswith("DUPE?"):
             meta.name = meta.name.replace(" DUPE?", "")
@@ -313,7 +326,13 @@ async def process_trackers(
                         try:
                             await check_tracker_image_hosts(meta, tracker_class)
                             if manual_tracker in api_trackers:
-                                await DescriptionBuilder(manual_tracker, config).unit3d_edit_desc(meta, manual_tracker)
+                                await DescriptionBuilder(manual_tracker, config).general_description_generator(
+                                    meta,
+                                    languages=False,
+                                    mediainfo=False,
+                                    nfo=False,
+                                    signature=manual_tracker,
+                                )
                             else:
                                 await tracker_class.edit_desc(meta)
                         except Exception as e:
@@ -324,33 +343,6 @@ async def process_trackers(
                 else:
                     logger.info(f"[green]{meta.name}")
                     logger.info(f"[green]Files can be found at: [yellow]{url}[/yellow]")
-
-        elif tracker == "TORRENTHR":
-            tracker_status = meta.tracker_status or {}
-            upload_status = cast(Mapping[str, Any], tracker_status.get(tracker, {})).get("upload", False)
-            if upload_status:
-                thr = TorrentHR(config=config)
-                thr_any = cast(Any, thr)
-                is_uploaded = False
-                try:
-                    upload_start_time = time.time()
-                    is_uploaded = await thr_any.upload(meta)
-                    upload_duration = time.time() - upload_start_time
-                    meta[f"{tracker}_upload_duration"] = upload_duration
-                except Exception as e:
-                    logger.info(f"[red]Upload failed: {e}")
-                    logger.info(traceback.format_exc())
-                    return
-                if is_uploaded:
-                    status = meta.tracker_status.setdefault("TORRENTHR", {})
-                    status["upload_success"] = True
-                    await client.add_to_client(meta, "TORRENTHR")
-                    print_tracker_result(tracker, thr, status, True)
-                else:
-                    status = meta.tracker_status.setdefault("TORRENTHR", {})
-                    status["upload_success"] = False
-                    print_tracker_result(tracker, thr, status, False)
-                    logger.info(f"[red]{tracker} upload failed or returned data error.[/red]")
 
         elif tracker == "PASSTHEPOPCORN":
             tracker_status = meta.tracker_status

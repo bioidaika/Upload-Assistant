@@ -11,7 +11,7 @@ import time
 import traceback
 import urllib.parse
 from collections.abc import Awaitable, Callable
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any, TypedDict, cast
 
 import httpx
@@ -56,6 +56,14 @@ class QbittorrentClientMixin:
 
     def _extract_tracker_ids_from_comment(self, comment: str) -> dict[str, str]:
         raise NotImplementedError
+
+    def _matches_qbit_content_path(self, torrent: Any, meta: Meta) -> bool:
+        """Match a qBittorrent content path before falling back to its display name."""
+        expected_path = str(meta.path or "")
+        content_path = str(getattr(torrent, "content_path", "") or "")
+        if expected_path and content_path and os.path.normcase(os.path.normpath(content_path)) == os.path.normcase(os.path.normpath(expected_path)):
+            return True
+        return self._torrent_name_matches(str(getattr(torrent, "name", "") or ""), meta)
 
     async def is_valid_torrent(self, meta: Meta, torrent_path: str, torrenthash: str, torrent_client: str, client: dict[str, Any]) -> tuple[bool, str]:
         raise NotImplementedError
@@ -166,7 +174,7 @@ class QbittorrentClientMixin:
                     logger.debug(f"[cyan]Stored comment for torrent: {comment[:100]}...")
 
                     tracker_ids: dict[str, str] = self._extract_tracker_ids_from_comment(comment)
-                    meta.update(tracker_ids)
+                    meta.set_tracker_ids(tracker_ids)
 
                     if meta.torrent_comments and meta.debug:
                         logger.info(f"[green]Stored {len(meta.torrent_comments)} torrent comments for later use")
@@ -297,6 +305,41 @@ class QbittorrentClientMixin:
             "Add torrent to qBittorrent via proxy",
             initial_timeout=14.0,
             retryable_errors=(TimeoutError, httpx.HTTPError, _RetryableProxyResponseError),
+        )
+
+    async def _add_torrent_direct(
+        self,
+        qbt_client: qbittorrentapi.Client,
+        infohash: str,
+        add_kwargs: dict[str, Any],
+    ) -> None:
+        add_attempt = 0
+
+        async def add_direct() -> None:
+            nonlocal add_attempt
+            if add_attempt:
+                with contextlib.suppress(Exception):
+                    torrents = await asyncio.to_thread(qbt_client.torrents_info, torrent_hashes=infohash)
+                    if torrents:
+                        logger.info("[green]Torrent was added to qBittorrent despite the previous connection issue.")
+                        return
+
+            add_attempt += 1
+            try:
+                result = await asyncio.to_thread(qbt_client.torrents_add, **add_kwargs)
+                if isinstance(result, str) and result.strip() == "Fails.":
+                    torrents = await asyncio.to_thread(qbt_client.torrents_info, torrent_hashes=infohash)
+                    if not torrents:
+                        raise qbittorrentapi.APIError("qBittorrent returned 'Fails.' when adding torrent")
+            except qbittorrentapi.Conflict409Error:
+                logger.info("[yellow]Torrent already exists in qBittorrent.")
+                return
+
+        await self.retry_qbt_operation(
+            add_direct,
+            "Add torrent to qBittorrent",
+            initial_timeout=14.0,
+            retryable_errors=(TimeoutError, httpx.HTTPError, qbittorrentapi.APIConnectionError),
         )
 
     async def init_qbittorrent_client(self, client: dict[str, Any]) -> qbittorrentapi.Client | None:
@@ -473,13 +516,13 @@ class QbittorrentClientMixin:
                 except AttributeError:
                     continue  # Ignore torrents with missing attributes
 
-                if meta.uuid.lower() != torrent_path.lower():
+                if not self._matches_qbit_content_path(torrent, meta):
                     continue
 
                 logger.debug(f"[cyan]Matched Torrent: {torrent.hash}")
                 logger.debug(f"Name: {torrent.name}")
                 logger.debug(f"Save Path: {torrent.save_path}")
-                logger.debug(f"Content Path: {torrent_path}")
+                logger.debug(f"Content Path: {getattr(torrent, 'content_path', torrent_path)}")
 
                 # The early cached-search path must retain the same tracker
                 # discovery side effect as the former get_pathed_torrents flow.
@@ -500,6 +543,33 @@ class QbittorrentClientMixin:
                             tracker_urls.append(str(tracker))
                 if tracker_urls:
                     await match_tracker_url(tracker_urls, meta)
+
+                # The first valid torrent is later reused as BASE.torrent, but
+                # it is not necessarily the torrent whose comment contains
+                # the metadata source. Inspect every matching comment, keeping
+                # any explicitly supplied tracker IDs authoritative.
+                comment = str(getattr(torrent, "comment", "") or "")
+                if not comment:
+                    try:
+                        if proxy_url:
+                            if qbt_session is None:
+                                raise RuntimeError("qBittorrent proxy session is not initialized")
+                            response = await qbt_session.get(f"{proxy_url.rstrip('/')}/api/v2/torrents/properties", params={"hash": torrent.hash})
+                            if response.status_code == 200:
+                                comment = str(response.json().get("comment", "") or "")
+                        elif qbt_client is not None:
+                            properties = await self.retry_qbt_operation(
+                                lambda qbt_client=qbt_client, torrent_hash=torrent.hash: asyncio.to_thread(qbt_client.torrents_properties, torrent_hash=torrent_hash),
+                                f"Get properties for torrent {torrent.name}",
+                            )
+                            comment = str(properties.get("comment", "") or "")
+                    except Exception as error:
+                        logger.debug(f"[yellow]Could not inspect torrent comment for {torrent.hash}: {error}[/yellow]")
+
+                tracker_ids = {key: value for key, value in self._extract_tracker_ids_from_comment(comment).items() if not meta.get_tracker_id(key)}
+                if tracker_ids:
+                    meta.set_tracker_ids(tracker_ids)
+                    logger.debug(f"[bold cyan]Found tracker IDs in matching torrent comment: {', '.join(sorted(tracker_ids))}")
 
                 matching_torrents.append({"hash": torrent.hash, "name": torrent.name})
 
@@ -853,31 +923,42 @@ class QbittorrentClientMixin:
             else:
                 if qbt_client is None:
                     raise RuntimeError("qbt_client cannot be None")
-                await self.retry_qbt_operation(
-                    lambda: asyncio.to_thread(
-                        qbt_client.torrents_add,
-                        torrent_files=torrent.dump(),
-                        save_path=save_path,
-                        use_auto_torrent_management=auto_management,
-                        is_skip_checking=skip_checking,
-                        paused=paused_on_add,
-                        content_layout=content_layout,
-                        category=qbt_category,
-                        tags=tag,
-                    ),
-                    "Add torrent to qBittorrent",
-                    initial_timeout=14.0,
-                )
+                add_kwargs = {
+                    "torrent_files": torrent.dump(),
+                    "save_path": save_path,
+                    "use_auto_torrent_management": auto_management,
+                    "is_skip_checking": skip_checking,
+                    "is_paused": paused_on_add,
+                    "is_stopped": paused_on_add,
+                    "paused": paused_on_add,
+                    "content_layout": content_layout,
+                    "category": qbt_category,
+                    "tags": tag,
+                }
+                await self._add_torrent_direct(qbt_client, torrent.infohash, add_kwargs)
         except _ProxyResponseError as e:
             logger.info(f"[bold red]Failed to add torrent via proxy: {e}")
             if qbt_session:
                 await qbt_session.aclose()
             return
-        except TimeoutError, httpx.HTTPError, qbittorrentapi.APIConnectionError:
-            logger.info("[bold red]Failed to add torrent to qBittorrent")
-            if qbt_session:
-                await qbt_session.aclose()
-            return
+        except (TimeoutError, httpx.HTTPError, qbittorrentapi.APIConnectionError) as e:
+            torrent_added = False
+            with contextlib.suppress(Exception):
+                if proxy_url and qbt_session:
+                    info_resp = await qbt_session.get(f"{qbt_proxy_url}/api/v2/torrents/info", params={"hashes": torrent.infohash})
+                    if info_resp.status_code == 200 and info_resp.json():
+                        torrent_added = True
+                elif qbt_client:
+                    torrents = await asyncio.to_thread(qbt_client.torrents_info, torrent_hashes=torrent.infohash)
+                    if torrents:
+                        torrent_added = True
+
+            if not torrent_added:
+                logger.info(f"[bold red]Failed to add torrent to qBittorrent: {e}")
+                if qbt_session:
+                    await qbt_session.aclose()
+                return
+            logger.info("[green]Torrent was confirmed in qBittorrent.")
         except Exception as e:
             logger.info(f"[bold red]Error adding torrent: {e}")
             if qbt_session:
@@ -917,6 +998,8 @@ class QbittorrentClientMixin:
             if qbt_session:
                 await qbt_session.aclose()
             return
+
+        logger.debug(f"[green]Successfully added torrent to qBittorrent ({tracker})[/green]")
 
         if not cross:
             try:
@@ -1147,9 +1230,9 @@ class QbittorrentClientMixin:
         is_disc = meta.is_disc
         if is_disc in ("", None) and len(meta.filelist) == 1:
             file_path = meta.filelist[0]
-            file_name = Path(file_path).name
-            parent_dir = Path(file_path).parent.name
-            return torrent_name.lower() == file_name.lower() or torrent_name.lower() == meta.uuid.lower() or (parent_dir and torrent_name.lower() == parent_dir.lower())
+            file_name = PureWindowsPath(file_path).name
+            parent_dir = PureWindowsPath(file_path).parent.name
+            return bool(torrent_name.lower() == file_name.lower() or torrent_name.lower() == meta.uuid.lower() or (parent_dir and torrent_name.lower() == parent_dir.lower()))
         return torrent_name.lower() == meta.uuid.lower()
 
     def _extract_tracker_matches(
@@ -1168,7 +1251,7 @@ class QbittorrentClientMixin:
                 if match:
                     tracker_id_value = match.group(1)
                     tracker_id_matches.append({"id": tracker_id, "tracker_id": tracker_id_value})
-                    meta[tracker_id] = tracker_id_value
+                    meta.set_tracker_ids({tracker_id: tracker_id_value})
                     tracker_found = True
 
         if torrent.tracker and "hawke.uno" in torrent.tracker and has_working_tracker:
@@ -1185,7 +1268,7 @@ class QbittorrentClientMixin:
                         "tracker_id": huno_id,
                     }
                 )
-                meta.huno = huno_id
+                meta.set_tracker_ids({"HAWKEUNO": huno_id})
                 tracker_found = True
 
         if torrent.tracker and "tracker.anthelion.me" in torrent.tracker:
@@ -1197,7 +1280,7 @@ class QbittorrentClientMixin:
                         "tracker_id": ant_id,
                     }
                 )
-                meta.ant = ant_id
+                meta.set_tracker_ids({"anthelion": ant_id})
                 tracker_found = True
 
         return tracker_id_matches, tracker_found
@@ -1220,7 +1303,7 @@ class QbittorrentClientMixin:
         from src.trackersetup import tracker_class_map
 
         tracker_patterns = {}
-        for name in set(tracker_class_map.keys()) | {"PASSTHEPOPCORN", "BEYONDHD", "BTN", "HDBITS"}:
+        for name in set(tracker_class_map.keys()) | {"PASSTHEPOPCORN", "BEYONDHD", "BROADCASTHENET", "HDBITS"}:
             # Determine URL
             url = ""
             if name in tracker_class_map:
@@ -1239,7 +1322,7 @@ class QbittorrentClientMixin:
                     "BLUTOPIA": "https://blutopia.cc",
                     "ULCX": "https://upload.cx",
                     "HDBITS": "https://hdbits.org",
-                    "BTN": "https://broadcasthe.net",
+                    "BROADCASTHENET": "https://broadcasthe.net",
                     "BEYONDHD": "https://beyond-hd.me",
                     "HAWKEUNO": "https://hawke.uno",
                     "REELFLIX": "https://reelflix.xyz",
@@ -1254,7 +1337,7 @@ class QbittorrentClientMixin:
                 # Determine pattern
                 if name == "PASSTHEPOPCORN":
                     pattern = r"torrentid=(\d+)"
-                elif name in ("HDBITS", "BTN"):
+                elif name in ("HDBITS", "BROADCASTHENET"):
                     pattern = r"id=(\d+)"
                 elif name == "BEYONDHD":
                     pattern = r"details/(\d+)"
@@ -1263,7 +1346,7 @@ class QbittorrentClientMixin:
 
                 tracker_patterns[name.lower()] = {"url": url, "pattern": pattern}
 
-        prioritized = ["aither", "ulcx", "lst", "blu", "oe", "btn", "bhd", "huno", "hdb", "rf", "otw", "yus", "dp", "sp", "ptp"]
+        prioritized = ["aither", "ulcx", "lst", "blu", "oe", "broadcasthenet", "bhd", "huno", "hdb", "rf", "otw", "yus", "dp", "sp", "ptp"]
         all_known = sorted(tracker_patterns.keys())
         tracker_priority = prioritized + [t for t in all_known if t not in prioritized]
         return tracker_patterns, tracker_priority
@@ -1796,7 +1879,6 @@ async def match_tracker_url(tracker_urls: list[str], meta: Meta) -> None:
             urls = getattr(tracker_class, "tracker_urls", None)
             if urls:
                 patterns[name.lower()] = urls
-        patterns.setdefault("btn", ["https://broadcasthe.net"])
         _cached_tracker_url_patterns = patterns
 
     tracker_url_patterns = _cached_tracker_url_patterns

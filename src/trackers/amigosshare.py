@@ -383,7 +383,7 @@ class AmigosShare:
         description_parts.append("[/center]")
 
         # Book details using DescriptionBuilder
-        builder = DescriptionBuilder(self.tracker, self.config)
+        builder = DescriptionBuilder(self.tracker, self.config, "pt-BR")
         book_section = builder._build_book_desc_section(meta, header_size=3, table=False)
         if book_section:
             description_parts.append(book_section)
@@ -456,7 +456,7 @@ class AmigosShare:
         overview: str = season_tmdb.get("overview", "") or main_tmdb.get("overview", "")
         if not overview:
             if meta.unattended and not meta.unattended_confirm:
-                logger.info(f"{self.tracker}: [yellow]Sinopse não encontrada no TMDb em modo unattended. Plando upload para {self.tracker}.[/yellow]")
+                logger.info(f"{self.tracker}: [yellow]Sinopse não encontrada no TMDb em modo unattended. Pulando upload para {self.tracker}.[/yellow]")
                 meta.skipping = f"{self.tracker}"
                 return ""
             user_input_raw = await prompt_in_thread(cli_ui.ask_string, f"{self.tracker}: Sinopse não encontrada no TMDb. Por favor, insira manualmente.")
@@ -596,7 +596,7 @@ class AmigosShare:
 
         if not tags:
             if not meta.genre and meta.unattended and not meta.unattended_confirm:
-                logger.info(f"{self.tracker}: [yellow]Gêneros não encontrados em modo unattended. Plando upload para {self.tracker}.[/yellow]")
+                logger.info(f"{self.tracker}: [yellow]Gêneros não encontrados em modo unattended. Pulando upload para {self.tracker}.[/yellow]")
                 meta.skipping = f"{self.tracker}"
                 return ""
             tags_raw = meta.genre or await prompt_in_thread(cli_ui.ask_string, f"Digite os gêneros (no formato do {self.tracker}): ")
@@ -733,7 +733,7 @@ class AmigosShare:
 
     async def build_game_description(self, meta: Meta) -> str:
         """Build GAME description using only the _build_game_desc_section block."""
-        builder = DescriptionBuilder(self.tracker, self.config)
+        builder = DescriptionBuilder(self.tracker, self.config, "pt-BR")
         desc_parts: list[str] = []
 
         game_section = builder._build_game_desc_section(meta, header_size=5, table=False)

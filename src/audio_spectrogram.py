@@ -7,16 +7,9 @@ import subprocess
 from pathlib import Path
 from typing import Any, cast
 
-import librosa
-import librosa.display
-import matplotlib
-
-matplotlib.use("Agg")
-
 import cli_ui
-import matplotlib.pyplot as plt
-import numpy as np
 
+from src.binaries import configured_binary
 from src.console import logger
 from src.meta import Meta
 from src.temp_paths import spectrograms_dir
@@ -46,7 +39,18 @@ def prompt_audio_stream_positions() -> str:
 
 def get_audio_streams(file_path: str | Path) -> list[dict[str, Any]]:
     """Return the audio streams reported by ffprobe, or raise a useful error."""
-    command = ["ffprobe", "-v", "error", "-show_entries", "stream=index:stream_tags=language,title", "-select_streams", "a", "-of", "json", str(file_path)]
+    command = [
+        configured_binary("ffprobe_path") or "ffprobe",
+        "-v",
+        "error",
+        "-show_entries",
+        "stream=index:stream_tags=language,title",
+        "-select_streams",
+        "a",
+        "-of",
+        "json",
+        str(file_path),
+    ]
     try:
         result = subprocess.run(command, capture_output=True, text=True, check=False, timeout=60)  # noqa: S603
     except (OSError, subprocess.TimeoutExpired) as error:
@@ -111,6 +115,8 @@ def get_spectrogram_sources(category: str, filelist: list[Any], disc_final_path:
 
 def get_stft_parameters(sample_count: int) -> tuple[int, int]:
     """Bound the matrix plotted by Matplotlib while retaining useful frequency detail."""
+    import numpy as np
+
     n_fft = min(SPECTROGRAM_N_FFT, max(32, 2 ** int(np.floor(np.log2(max(sample_count, 1))))))
     hop_length = max(n_fft // 4, int(np.ceil(sample_count / MAX_TIME_BINS)))
     return n_fft, hop_length
@@ -154,7 +160,7 @@ def generate_spectrogram(
 ) -> Path:
     """Decode one stream and generate a frequency/time image suitable for review."""
     command = [
-        "ffmpeg",
+        configured_binary("ffmpeg_path") or "ffmpeg",
         "-v",
         "error",
         "-nostdin",
@@ -179,6 +185,17 @@ def generate_spectrogram(
     if result.returncode or not result.stdout:
         detail = result.stderr.decode(errors="replace").strip() or "no audio was produced"
         raise RuntimeError(f"FFmpeg could not decode audio stream {stream_index}: {detail}")
+
+    try:
+        import librosa
+        import librosa.display
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import numpy as np
+    except ImportError as e:
+        raise RuntimeError("Missing required libraries for spectrogram generation. Install librosa and matplotlib.") from e
 
     try:
         samples, actual_sample_rate = librosa.load(io.BytesIO(result.stdout), sr=None, mono=True)

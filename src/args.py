@@ -1,16 +1,21 @@
 # Upload Assistant © 2025 Audionut & wastaken7 — Licensed under UAPL v1.0
+from __future__ import annotations
+
 import argparse
 import datetime
 import re
 import sys
 import urllib.parse
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, TextIO
+from typing import TYPE_CHECKING, Any, TextIO
 
-from src.book_prep import detect_newspaper, sanitize_book_author, sanitize_book_language
-from src.console import logger
-from src.meta import Meta
+import argcomplete
+
+from src.app_paths import DATA_DIR
+
+if TYPE_CHECKING:
+    from src.meta import Meta
 
 MUSIC_MEDIA_CHOICES = ("cd", "web", "vinyl", "dvd", "bd", "soundboard", "sacd", "dat", "cassette")
 MUSIC_RELEASE_TYPE_CHOICES = (
@@ -34,6 +39,81 @@ MUSIC_RELEASE_TYPE_CHOICES = (
 )
 
 PATHS_FROM_STDIN_OPTION = "--paths-from-stdin"
+TRACKER_CONFIGURATION_KEYS = ("api_key", "auth_key", "username", "password", "passkey", "cookie_file", "cookies", "ApiUser", "bioma_api_key", "ptgen_api")
+
+
+def _has_configured_value(options: Mapping[str, Any]) -> bool:
+    for key in TRACKER_CONFIGURATION_KEYS:
+        value = options.get(key)
+        if isinstance(value, str):
+            value = value.strip()
+        if value not in (None, "", False):
+            return True
+    return False
+
+
+def configured_tracker_completions(config: Mapping[str, Any], cookies_dir: Path | None = None) -> dict[str, str]:
+    """Return configured tracker names suitable for shell completion."""
+    trackers = config.get("TRACKERS", {})
+    if not isinstance(trackers, Mapping):
+        return {}
+
+    configured: dict[str, str] = {}
+    default_trackers = trackers.get("default_trackers", "")
+    if isinstance(default_trackers, str):
+        default_names = default_trackers.split(",")
+    elif isinstance(default_trackers, Sequence):
+        default_names = default_trackers
+    else:
+        default_names = ()
+    for name in default_names:
+        normalized = str(name).strip()
+        if normalized:
+            configured[normalized.lower()] = normalized
+
+    cookie_files: tuple[Path, ...] = ()
+    cookie_root = cookies_dir or DATA_DIR / "cookies"
+    try:
+        if cookie_root.is_dir():
+            cookie_files = tuple(path for path in cookie_root.iterdir() if path.is_file())
+    except OSError:
+        cookie_files = ()
+
+    for name, options in trackers.items():
+        if not isinstance(options, Mapping):
+            continue
+        tracker_name = str(name).strip()
+        if not tracker_name:
+            continue
+        tracker_key = tracker_name.lower()
+        has_config_value = _has_configured_value(options)
+        has_cookie_file = any(tracker_key == path.stem.lower() or tracker_key in path.name.lower() for path in cookie_files)
+        if has_config_value or has_cookie_file:
+            configured[tracker_key] = tracker_name
+
+    display_name_re = re.compile(r'^\s*display_name\s*=\s*(["\'])(.*?)\1', re.MULTILINE)
+    supported_cats_re = re.compile(r"^\s*supported_categories\s*=\s*\((.*?)\)", re.MULTILINE | re.DOTALL)
+    tracker_dir = Path(__file__).parent / "trackers"
+    try:
+        source_files = tracker_dir.rglob("*.py") if tracker_dir.is_dir() else ()
+        for source_file in source_files:
+            if source_file.name in ("__init__.py", "common.py", "routing.py") or source_file.name.endswith("_TEMPLATE.py"):
+                continue
+            tracker_key = source_file.stem.lower()
+            if tracker_key not in configured:
+                continue
+            source = source_file.read_text(encoding="utf-8")
+            display_match = display_name_re.search(source)
+            categories_match = supported_cats_re.search(source)
+            display_name = display_match.group(2) if display_match else configured[tracker_key].title()
+            categories = []
+            if categories_match:
+                categories = [category.strip().strip("\"'") for category in categories_match.group(1).split(",") if category.strip()]
+            configured[tracker_key] = f"{display_name} ({', '.join(categories)})" if categories else display_name
+    except OSError, UnicodeError:
+        pass
+
+    return configured
 
 
 def read_paths_from_stdin(argv: Sequence[str], stream: TextIO) -> tuple[list[str], list[str]]:
@@ -47,6 +127,8 @@ def read_paths_from_stdin(argv: Sequence[str], stream: TextIO) -> tuple[list[str
     args.remove(PATHS_FROM_STDIN_OPTION)
     interactive = stream.isatty()
     if interactive:
+        from src.console import logger
+
         logger.info("[cyan]Paste one full path per line, then press Enter on an empty line to start.[/cyan]")
 
     paths: list[str] = []
@@ -81,10 +163,13 @@ class ShortHelpFormatter(argparse.HelpFormatter):
 Common options:
   -tmdb, --tmdb              Specify the TMDb id to use with movie/ or tv/ prefix
   -imdb, --imdb              Specify the IMDb id to use
+  --no-imdb                  Do not search for or use IMDb metadata
+  --cast                     Comma-separated cast override (takes priority over API metadata)
   -tvmaze, --tvmaze          Specify the TVMaze id to use
   -tvdb, --tvdb              Specify the TVDB id to use
   --queue (queue name)       Process an entire folder (including files/subfolders) in a queue
   -mf, --manual_frames       Comma-separated list of frame numbers to use for screenshots
+  --description              Inline custom description block
   -df, --descfile            Path to custom description file
   -boverview, --book-overview  Book/Audiobook overview/synopsis (overrides auto-detected value)
   -serv, --service           Streaming service
@@ -132,6 +217,142 @@ class Args:
             usage="upload.py [path...] [options]",
         )
 
+        def make_dict_completer(choices_dict):
+            def completer(prefix: str, **_: Any):
+                return {k: v for k, v in choices_dict.items() if k.lower().startswith(prefix.lower())}
+
+            return completer
+
+        category_completer = make_dict_completer(
+            {"movie": "Movie", "tv": "TV Show", "fanres": "Fan Restoration", "book": "E-Book or Audiobook", "game": "Video Game", "music": "Music Release"}
+        )
+
+        music_media_completer = make_dict_completer(
+            {
+                "cd": "Compact Disc",
+                "web": "Web Release",
+                "vinyl": "Vinyl Record",
+                "dvd": "DVD Audio / Video",
+                "bd": "Blu-ray Disc",
+                "soundboard": "Soundboard Recording",
+                "sacd": "Super Audio CD",
+                "dat": "Digital Audio Tape",
+                "cassette": "Cassette Tape",
+            }
+        )
+
+        music_release_type_completer = make_dict_completer(
+            {
+                "album": "Studio Album",
+                "soundtrack": "Original Soundtrack",
+                "ep": "Extended Play",
+                "anthology": "Anthology Collection",
+                "compilation": "Compilation Album",
+                "sampler": "Label Sampler",
+                "single": "Single Release",
+                "demo": "Demo Recording",
+                "live album": "Live Concert Album",
+                "split": "Split Release",
+                "remix": "Remix Album",
+                "bootleg": "Unofficial Bootleg",
+                "interview": "Artist Interview",
+                "mixtape": "Mixtape",
+                "concert recording": "Live Concert Recording",
+                "dj mix": "DJ Mix",
+                "unknown": "Unknown Type",
+            }
+        )
+
+        type_completer = make_dict_completer(
+            {
+                "disc": "Full Disc (BDMV/ISO)",
+                "remux": "Remuxed MKV",
+                "encode": "Encoded Release",
+                "web-dl": "Web-DL (untouched)",
+                "webrip": "Web-Rip (re-encoded)",
+                "hdtv": "HDTV Capture",
+                "dvdrip": "DVD Rip",
+            }
+        )
+
+        source_completer = make_dict_completer(
+            {
+                "BluRay": "Blu-ray Disc",
+                "DVD": "Standard DVD",
+                "DVD5": "Single-layer DVD",
+                "DVD9": "Dual-layer DVD",
+                "HDDVD": "HD-DVD",
+                "WEB": "Web Release",
+                "HDTV": "HDTV Broadcast",
+                "UHDTV": "UHDTV Broadcast",
+                "LaserDisc": "LaserDisc",
+                "DCP": "Digital Cinema Package",
+            }
+        )
+
+        resolution_completer = make_dict_completer(
+            {
+                "2160p": "4K UHD (3840x2160)",
+                "1080p": "Full HD (1920x1080)",
+                "1080i": "Full HD Interlaced",
+                "720p": "HD (1280x720)",
+                "576p": "SD PAL (720x576)",
+                "576i": "SD PAL Interlaced",
+                "480p": "SD NTSC (720x480)",
+                "480i": "SD NTSC Interlaced",
+                "8640p": "16K Resolution",
+                "4320p": "8K UHD (7680x4320)",
+                "other": "Other/Unknown Resolution",
+            }
+        )
+
+        platform_completer = make_dict_completer(
+            {
+                "pc": "Windows PC",
+                "ps5": "PlayStation 5",
+                "ps4": "PlayStation 4",
+                "ps3": "PlayStation 3",
+                "ps2": "PlayStation 2",
+                "xbox": "Original Xbox",
+                "x360": "Xbox 360",
+                "xone": "Xbox One",
+                "xsx": "Xbox Series X/S",
+                "switch": "Nintendo Switch",
+                "3ds": "Nintendo 3DS",
+                "nds": "Nintendo DS",
+                "wiiu": "Nintendo Wii U",
+                "wii": "Nintendo Wii",
+                "mac": "macOS",
+                "linux": "Linux",
+            }
+        )
+
+        imghost_completer = make_dict_completer(
+            {
+                "imgbb": "ImgBB",
+                "imgbox": "Imgbox",
+                "pixhost": "Pixhost",
+                "lensdump": "Lensdump",
+                "ptscreens": "PTScreens",
+                "onlyimage": "OnlyImage",
+                "dalexni": "Dalexni",
+                "zipline": "Zipline",
+                "midnightscene": "MidnightScene",
+                "passtheimage": "PassTheImage",
+                "seedpool_cdn": "Seedpool CDN",
+                "utppm": "UTPPM",
+                "lostimg": "LostImg",
+            }
+        )
+
+        game_subcategory_completer = make_dict_completer({"full_game": "Base Game", "full_game_dlc": "Game + DLCs", "dlc": "DLC Only", "update": "Game Update/Patch"})
+
+        max_piece_size_completer = make_dict_completer(
+            {"1": "1 MiB", "2": "2 MiB", "4": "4 MiB", "8": "8 MiB", "16": "16 MiB", "32": "32 MiB", "64": "64 MiB", "128": "128 MiB"}
+        )
+
+        upload_order_completer = make_dict_completer({"concurrent": "Upload to both simultaneously", "usenet": "Upload to Usenet first", "tracker": "Upload to Trackers first"})
+
         parser.add_argument("path", nargs="*", help="Path to file/directory (in single/double quotes is best)")
         parser.add_argument(
             PATHS_FROM_STDIN_OPTION,
@@ -140,7 +361,7 @@ class Args:
             help="Read one full path per line from standard input (finish an interactive paste with an empty line)",
         )
         parser.add_argument("--queue", nargs=1, required=False, help="(--queue queue_name) Process an entire folder (files/subfolders) in a queue")
-        parser.add_argument("-lq", "--limit-queue", dest="limit_queue", nargs=1, required=False, help="Limit the amount of queue files processed", type=int, default=0)
+        parser.add_argument("-lq", "--limit-queue", dest="limit_queue", nargs=1, required=False, help="Limit the amount of queue files processed", default=0)
         parser.add_argument(
             "-sc",
             "--site-check",
@@ -176,11 +397,12 @@ class Args:
             nargs=1,
             required=False,
             help="Which of your comparison indexes is the main images (required when comps)",
-            type=int,
             default=None,
         )
         parser.add_argument("-mf", "--manual_frames", nargs=1, required=False, help="Comma-separated frame numbers to use as screenshots", type=str, default=None)
-        parser.add_argument(
+        parser.add_argument("--poster", nargs=1, required=False, help="Public artwork URL or local poster image path", dest="explicit_poster")
+        parser.add_argument("--banner", nargs=1, required=False, help="Public artwork URL or local banner image path", dest="explicit_banner")
+        action_c = parser.add_argument(
             "-c",
             "--category",
             nargs=1,
@@ -189,9 +411,10 @@ class Args:
             choices=["movie", "tv", "fanres", "book", "game", "music"],
             dest="manual_category",
         )
+        action_c.completer = category_completer
         parser.add_argument("--music-artist", nargs=1, required=False, help="MUSIC: main artist(s), separated by &", dest="music_artist")
         parser.add_argument("--music-album", nargs=1, required=False, help="MUSIC: album/release title", dest="music_album")
-        parser.add_argument(
+        action_music_media = parser.add_argument(
             "--music-media",
             nargs=1,
             required=False,
@@ -200,7 +423,8 @@ class Args:
             help="MUSIC: source medium (CD, WEB, Vinyl, DVD, BD, Soundboard, SACD, DAT, Cassette)",
             dest="music_media",
         )
-        parser.add_argument(
+        action_music_media.completer = music_media_completer
+        action_music_rel_type = parser.add_argument(
             "--music-release-type",
             nargs=1,
             required=False,
@@ -209,14 +433,14 @@ class Args:
             help="MUSIC: Orpheus release type (album, ep, single, compilation, live album, etc.)",
             dest="music_release_type",
         )
+        action_music_rel_type.completer = music_release_type_completer
         parser.add_argument(
-            "--music-release-year", nargs=1, required=False, type=int, help="MUSIC: concrete release/pressing year (not the original group year)", dest="music_release_year"
+            "--music-release-year", nargs=1, required=False, help="MUSIC: concrete release/pressing year (not the original group year)", dest="music_release_year"
         )
-        parser.add_argument("--music-edition-year", nargs=1, required=False, type=int, help="MUSIC: remaster/reissue/edition year", dest="music_edition_year")
+        parser.add_argument("--music-edition-year", nargs=1, required=False, help="MUSIC: remaster/reissue/edition year", dest="music_edition_year")
         parser.add_argument("--music-label", nargs=1, required=False, help="MUSIC: label for this release", dest="music_label")
         parser.add_argument("--music-catalogue-number", nargs=1, required=False, help="MUSIC: catalogue number for this release", dest="music_catalogue_number")
         parser.add_argument("--music-genre", nargs=1, required=False, help="MUSIC: comma-separated genre override", dest="music_genres")
-        parser.add_argument("--music-cover", nargs=1, required=False, help="MUSIC: public artwork URL or local cover image path", dest="music_cover")
         parser.add_argument(
             "--music-discogs-id",
             nargs=1,
@@ -229,7 +453,7 @@ class Args:
         parser.add_argument("--no-music-discogs", dest="music_discogs_enabled", action="store_false", default=True, help="MUSIC: disable Discogs lookup and metadata")
         parser.add_argument("--music-enrich", dest="music_enrichment", action="store_true", default=None, help="MUSIC: enable bounded MusicBrainz enrichment for this run")
         parser.add_argument("--no-music-enrich", dest="music_enrichment", action="store_false", help="MUSIC: disable MusicBrainz enrichment for this run")
-        parser.add_argument(
+        action_t = parser.add_argument(
             "-t",
             "--type",
             nargs=1,
@@ -238,7 +462,8 @@ class Args:
             choices=["disc", "remux", "encode", "webdl", "web-dl", "webrip", "hdtv", "dvdrip"],
             dest="manual_type",
         )
-        parser.add_argument(
+        action_t.completer = type_completer
+        action_source = parser.add_argument(
             "--source",
             nargs=1,
             required=False,
@@ -246,7 +471,8 @@ class Args:
             choices=["Blu-ray", "BluRay", "DVD", "DVD5", "DVD9", "HDDVD", "WEB", "HDTV", "UHDTV", "LaserDisc", "DCP"],
             dest="manual_source",
         )
-        parser.add_argument(
+        action_source.completer = source_completer
+        action_res = parser.add_argument(
             "-res",
             "--resolution",
             nargs=1,
@@ -254,12 +480,16 @@ class Args:
             help="Resolution [2160p, 1080p, 1080i, 720p, 576p, 576i, 480p, 480i, 8640p, 4320p, OTHER]",
             choices=["2160p", "1080p", "1080i", "720p", "576p", "576i", "480p", "480i", "8640p", "4320p", "other"],
         )
+        action_res.completer = resolution_completer
         parser.add_argument("-tmdb", "--tmdb", nargs=1, required=False, help="TMDb ID (use movie/ or tv/ prefix)", type=str, dest="tmdb_manual")
-        parser.add_argument("-imdb", "--imdb", nargs=1, required=False, help="IMDb ID", type=str, dest="imdb_manual")
+        imdb_group = parser.add_mutually_exclusive_group()
+        imdb_group.add_argument("-imdb", "--imdb", nargs=1, required=False, help="IMDb ID", type=str, dest="imdb_manual")
+        imdb_group.add_argument("--no-imdb", action="store_true", required=False, help="Do not search for or use IMDb metadata")
+        parser.add_argument("--cast", nargs=1, required=False, help="Comma-separated cast override (takes priority over API metadata)", type=str, dest="manual_cast")
         parser.add_argument("-mal", "--mal", nargs=1, required=False, help="MAL ID", type=str, dest="mal_manual")
         parser.add_argument("-tvmaze", "--tvmaze", nargs=1, required=False, help="TVMAZE ID", type=str, dest="tvmaze_manual")
         parser.add_argument("-tvdb", "--tvdb", nargs=1, required=False, help="TVDB ID", type=str, dest="tvdb_manual")
-        parser.add_argument("-douban", "--douban", nargs=1, required=False, help="Douban ID (Number only)", type=int, dest="douban_manual", default=0)
+        parser.add_argument("-douban", "--douban", nargs=1, required=False, help="Douban ID (Number only)", dest="douban_manual", default=0)
         parser.add_argument("--no-metadata-cache", action="store_true", required=False, help="Do not read or write the persistent metadata cache", dest="no_metadata_cache")
         parser.add_argument("-igdb", "--igdb", nargs=1, required=False, help="IGDB ID", type=str, dest="igdb_manual")
         parser.add_argument("-steam", "--steam", nargs=1, required=False, help="Steam App ID or URL", type=str, dest="steam_manual")
@@ -289,6 +519,7 @@ class Args:
         parser.add_argument("--no-dub", dest="no_dub", action="store_true", required=False, help="Remove Dubbed from title")
         parser.add_argument("--no-dual", dest="no_dual", action="store_true", required=False, help="Remove Dual-Audio from title")
         parser.add_argument("--no-tag", dest="no_tag", action="store_true", required=False, help="Remove Group Tag from title")
+        parser.add_argument("--name", nargs=1, required=False, help="Override the generated release name", type=str, dest="manual_name")
         parser.add_argument("--no-edition", dest="no_edition", action="store_true", required=False, help="Remove Edition from title")
         parser.add_argument("--dual-audio", dest="dual_audio", action="store_true", required=False, help="Add Dual-Audio to the title")
         parser.add_argument("-ol", "--original-language", dest="manual_language", nargs=1, required=False, help="Set original audio language")
@@ -302,10 +533,9 @@ class Args:
             type=str,
         )
         parser.add_argument("-ns", "--no-seed", action="store_true", required=False, help="Do not add torrent to the client")
-        parser.add_argument("-year", "--year", dest="manual_year", nargs=1, required=False, help="Override the year found", type=int, default=0)
+        parser.add_argument("-year", "--year", dest="manual_year", nargs=1, required=False, help="Override the year found", default=0)
         parser.add_argument("-author", "--author", nargs="*", required=False, help="Book/Audiobook author name (overrides auto-detected value)", type=str, dest="book_author")
         parser.add_argument("-btitle", "--book-title", nargs="*", required=False, help="Book/Audiobook title (overrides auto-detected value)", type=str, dest="book_title")
-        parser.add_argument("--book-cover", nargs=1, required=False, help="BOOK: public artwork URL or local cover image path", dest="book_cover")
         parser.add_argument("--comic", "-comic", action="store_true", required=False, help="Identify the book upload as a Comic", dest="comic", default=False)
         parser.add_argument("--manga", "-manga", action="store_true", required=False, help="Identify the book upload as a Manga", dest="manga", default=False)
         parser.add_argument("--magazine", "-magazine", action="store_true", required=False, help="Identify the book upload as a Magazine", dest="magazine", default=False)
@@ -364,7 +594,7 @@ class Args:
             type=str,
             dest="book_publisher",
         )
-        parser.add_argument(
+        action_plat = parser.add_argument(
             "-plat",
             "--platform",
             "--platforms",
@@ -375,6 +605,7 @@ class Args:
             choices=["pc", "ps5", "ps4", "ps3", "ps2", "xbox", "x360", "xone", "xsx", "switch", "3ds", "nds", "wiiu", "wii", "mac", "linux"],
             dest="manual_platform",
         )
+        action_plat.completer = platform_completer
         parser.add_argument(
             "-gv",
             "--game-version",
@@ -391,7 +622,7 @@ class Args:
             required=False,
             help="Force a MULTI language tag for GAME releases",
         )
-        parser.add_argument(
+        action_gsc = parser.add_argument(
             "-gsc",
             "--game-subcategory",
             nargs=1,
@@ -401,6 +632,7 @@ class Args:
             choices=["full_game", "full_game_dlc", "dlc", "update"],
             dest="game_subcategory",
         )
+        action_gsc.completer = game_subcategory_completer
         parser.add_argument(
             "-mc", "--commentary", dest="manual_commentary", action="store_true", required=False, help="Manually indicate whether commentary tracks are included"
         )
@@ -421,17 +653,12 @@ class Args:
             required=False,
             help="Use the largest video file for processing instead of the first video file found",
         )
-        parser.add_argument("-ptp", "--ptp", nargs=1, required=False, help="PASSTHEPOPCORN torrent id/permalink", type=str)
-        parser.add_argument("-blu", "--blu", nargs=1, required=False, help="BLUTOPIA torrent id/link", type=str)
-        parser.add_argument("-aither", "--aither", nargs=1, required=False, help="AITHER torrent id/link", type=str)
-        parser.add_argument("-lst", "--lst", nargs=1, required=False, help="LST torrent id/link", type=str)
-        parser.add_argument("-oe", "--oe", nargs=1, required=False, help="ONLYENCODES torrent id/link", type=str)
-        parser.add_argument("-hdb", "--hdb", nargs=1, required=False, help="HDBITS torrent id/link", type=str)
-        parser.add_argument("-btn", "--btn", nargs=1, required=False, help="BTN torrent id/link", type=str)
-        parser.add_argument("-bhd", "--bhd", nargs=1, required=False, help="BEYONDHD torrent_id/link", type=str)
-        parser.add_argument("--orpheus", nargs=1, required=False, help="Orpheus torrent id/permalink (MUSIC metadata enrichment)", type=str)
-        parser.add_argument("-huno", "--huno", nargs=1, required=False, help="HAWKEUNO torrent id/link", type=str)
-        parser.add_argument("-ulcx", "--ulcx", nargs=1, required=False, help="ULCX torrent id/link", type=str)
+        parser.add_argument(
+            "--tracker-id",
+            action="append",
+            metavar="TRACKER=ID|URL",
+            help="Tracker torrent ID, as TRACKER=ID, TRACKER=URL, or a tracker torrent URL. May be repeated.",
+        )
         parser.add_argument("-req", "--search_requests", action="store_true", required=False, help="Search for matching requests on supported trackers", default=None)
         parser.add_argument("-sat", "--skip_auto_torrent", action="store_true", required=False, help="Skip automated qbittorrent client torrent searching", default=None)
         parser.add_argument(
@@ -474,6 +701,13 @@ class Args:
             help="Custom description block to insert (link to hastebin/pastebin). This is added as a section inside the final description and does NOT replace the auto-generated description (MediaInfo, screenshots, etc.)",
         )
         parser.add_argument(
+            "--description",
+            dest="description_inline",
+            nargs=1,
+            required=False,
+            help="Inline custom description block to insert. This is added as a section inside the final description and does NOT replace auto-generated sections (MediaInfo, screenshots, etc.)",
+        )
+        parser.add_argument(
             "-df",
             "--descfile",
             dest="description_file",
@@ -504,7 +738,7 @@ class Args:
             type=str,
             default="",
         )
-        parser.add_argument(
+        action_ih = parser.add_argument(
             "-ih",
             "--imghost",
             nargs=1,
@@ -526,6 +760,7 @@ class Args:
                 "lostimg",
             ],
         )
+        action_ih.completer = imghost_completer
         parser.add_argument("-siu", "--skip-imagehost-upload", dest="skip_imghost_upload", action="store_true", required=False, help="Skip Uploading to an image host")
         parser.add_argument("-th", "--torrenthash", nargs=1, required=False, help="Torrent Hash to re-use from your client's session directory")
         parser.add_argument("-nfo", "--nfo", action="store_true", required=False, help="Use .nfo in directory for description")
@@ -550,6 +785,7 @@ class Args:
         parser.add_argument("-st", "--stream", action="store_true", required=False, help="Stream Optimized Upload")
         parser.add_argument("-webdv", "--webdv", action="store_true", required=False, help="Contains a Dolby Vision layer converted using dovi_tool (HYBRID)")
         parser.add_argument("-hc", "--hardcoded-subs", action="store_true", required=False, help="Contains hardcoded subs", dest="hardcoded_subs")
+        parser.add_argument("-hcl", "--hardcoded-subs-language", nargs=1, required=False, help="Language/s of hardcoded subtitles", dest="hardcoded_subs_language")
         parser.add_argument("-pr", "--personalrelease", action="store_true", required=False, help="Personal Release")
         parser.add_argument("-sdc", "--skip-dupe-check", action="store_true", required=False, help="Ignore dupes and upload anyway (Skips dupe check)", dest="dupe")
         parser.add_argument(
@@ -570,7 +806,6 @@ class Args:
             nargs=1,
             required=False,
             help="Ignore dupes if their size difference is greater than or equal to this percentage (e.g. 20)",
-            type=float,
         )
         parser.add_argument(
             "-debug", "--debug", action="store_true", required=False, help="Debug Mode, will run through all the motions providing extra info, but will not upload to trackers."
@@ -579,7 +814,7 @@ class Args:
         parser.add_argument(
             "-uptimer", "--upload-timer", action="store_true", required=False, help="Prints the time it takes to upload to each individual site.", dest="upload_timer"
         )
-        parser.add_argument(
+        action_mps = parser.add_argument(
             "-mps",
             "--max-piece-size",
             nargs=1,
@@ -587,6 +822,7 @@ class Args:
             help="Set max piece size allowed in MiB for default torrent creation (default 128 MiB)",
             choices=["1", "2", "4", "8", "16", "32", "64", "128"],
         )
+        action_mps.completer = max_piece_size_completer
         parser.add_argument("-nh", "--nohash", action="store_true", required=False, help="Don't hash .torrent")
         parser.add_argument("-rh", "--rehash", action="store_true", required=False, help="DO hash .torrent")
         parser.add_argument("-mkbrr", "--mkbrr", action="store_true", required=False, help="Use mkbrr for torrent hashing")
@@ -600,19 +836,35 @@ class Args:
         )
         parser.add_argument("-dr", "--draft", action="store_true", required=False, help="Send to drafts (BEYONDHD, LST)")
         parser.add_argument("-mq", "--modq", action="store_true", required=False, help="Send to modQ")
+        parser.add_argument("-feat", "--featured", action="store_true", required=False, help="Featured torrent")
+        parser.add_argument(
+            "-dup",
+            "--double-upload",
+            action="store_true",
+            required=False,
+            help="Double upload (UNIT3D internal/staff only)",
+            dest="doubleup",
+        )
+        parser.add_argument(
+            "-dupuntil",
+            "--double-upload-until",
+            nargs=1,
+            required=False,
+            help="Double upload duration in days (Aither, internal/staff only)",
+            default=0,
+            dest="double_upload_until",
+        )
+        parser.add_argument("-stk", "--sticky", action="store_true", required=False, help="Sticky torrent (Pinned)")
+        parser.add_argument("-ref", "--refundable", action="store_true", required=False, help="Refundable torrent (Aither, internal/staff only)")
         parser.add_argument("-client", "--client", nargs=1, required=False, help="Use this torrent client instead of default")
         parser.add_argument("-qbt", "--qbit-tag", dest="qbit_tag", nargs=1, required=False, help="Add to qbit with this tag")
         parser.add_argument("-qbc", "--qbit-cat", dest="qbit_cat", nargs=1, required=False, help="Add to qbit with this category")
         parser.add_argument(
             "-qbcon", "--qbit-bw-control", action="store_true", required=False, help="Enable qBittorrent bandwidth control logic before upload", dest="qbit_bandwidth_control"
         )
-        parser.add_argument(
-            "-qbcrl", "--qbit-bw-threshold", nargs=1, required=False, help="qBittorrent bandwidth limit threshold (KB/s)", type=int, dest="qbit_bandwidth_threshold"
-        )
-        parser.add_argument(
-            "-qbctime", "--qbit-bw-time", nargs=1, required=False, help="Time to stay under qBittorrent threshold (seconds)", type=int, dest="qbit_bandwidth_time"
-        )
-        parser.add_argument(
+        parser.add_argument("-qbcrl", "--qbit-bw-threshold", nargs=1, required=False, help="qBittorrent bandwidth limit threshold (KB/s)", dest="qbit_bandwidth_threshold")
+        parser.add_argument("-qbctime", "--qbit-bw-time", nargs=1, required=False, help="Time to stay under qBittorrent threshold (seconds)", dest="qbit_bandwidth_time")
+        action_uo = parser.add_argument(
             "-uo",
             "--upload-order",
             dest="upload_order",
@@ -621,9 +873,21 @@ class Args:
             choices=["concurrent", "usenet", "tracker"],
             help="Set the upload order when both torrent trackers and Usenet are selected ('concurrent', 'usenet', 'tracker')",
         )
+        action_uo.completer = upload_order_completer
         parser.add_argument("-rtl", "--rtorrent-label", dest="rtorrent_label", nargs=1, required=False, help="Add to rtorrent with this label")
-        parser.add_argument("-tk", "--trackers", nargs=1, required=False, help="Upload to these trackers, comma separated (--trackers blu,bhd) including manual")
-        parser.add_argument(
+
+        def _tracker_completer(prefix: str, **_: Any) -> dict[str, str]:
+            configured = configured_tracker_completions(self.config)
+
+            if "," in prefix:
+                base, current = prefix.rsplit(",", 1)
+                return {f"{base},{t}": desc for t, desc in configured.items() if t.startswith(current.lower())}
+            return {t: desc for t, desc in configured.items() if t.startswith(prefix.lower())}
+
+        tk_action = parser.add_argument("-tk", "--trackers", nargs=1, required=False, help="Upload to these trackers, comma separated (--trackers blu,bhd) including manual")
+        tk_action.completer = _tracker_completer
+
+        rtk_action = parser.add_argument(
             "-rtk",
             "--trackers-remove",
             dest="trackers_remove",
@@ -631,6 +895,7 @@ class Args:
             required=False,
             help="Remove these trackers when processing default trackers, comma separated (--trackers-remove blu,bhd)",
         )
+        rtk_action.completer = _tracker_completer
         parser.add_argument(
             "-tpc",
             "--trackers-pass",
@@ -638,7 +903,6 @@ class Args:
             nargs=1,
             required=False,
             help="How many trackers need to pass all checks (dupe/banned group/etc) to actually proceed to uploading",
-            type=int,
         )
         parser.add_argument("-rt", "--randomized", nargs=1, required=False, help="Number of extra, torrents with random infohash", default=0)
         parser.add_argument(
@@ -648,7 +912,6 @@ class Args:
             nargs=1,
             required=False,
             help="Use entropy in created torrents. (32 or 64) bits (ie: -entropy 32). Not supported at all sites, you many need to redownload the torrent",
-            type=int,
             default=0,
         )
         parser.add_argument("-ua", "--unattended", action="store_true", required=False, help=argparse.SUPPRESS)
@@ -668,6 +931,15 @@ class Args:
             help="Freeleech Percentage. Any value 1-100 works, but site search is limited to certain values",
             default=0,
             dest="freeleech",
+        )
+        parser.add_argument(
+            "-fl-until",
+            "--freeleech-until",
+            nargs=1,
+            required=False,
+            help="Freeleech duration in days (Aither, internal/staff only)",
+            default=0,
+            dest="freeleech_until",
         )
         parser.add_argument("--infohash", nargs=1, required=False, help="V1 Info Hash")
         parser.add_argument(
@@ -713,6 +985,9 @@ class Args:
             type=str,
             dest="archive_password",
         )
+        argcomplete.autocomplete(parser)
+        from src.console import logger
+
         parsed_args_ns, before_args = parser.parse_known_args(input)
         parsed_args: dict[str, Any] = vars(parsed_args_ns)
         # console.print(args)
@@ -753,7 +1028,33 @@ class Args:
                     elif key == "description_file" or key == "comparison":
                         meta[key] = str(Path(value2).resolve())
                     elif key == "screens":
-                        meta[key] = int(value2)
+                        try:
+                            meta[key] = int(value2)
+                        except ValueError, TypeError:
+                            meta[key] = int(self.config.get("DEFAULT", {}).get("screens", 1))
+                    elif key in ("trackers_pass", "comparison_index"):
+                        try:
+                            meta[key] = int(value2)
+                        except ValueError, TypeError:
+                            meta[key] = None
+                    elif key in (
+                        "limit_queue",
+                        "randomized",
+                        "max_piece_size",
+                        "entropy",
+                        "douban_manual",
+                        "music_release_year",
+                        "music_edition_year",
+                        "qbit_bandwidth_threshold",
+                        "qbit_bandwidth_time",
+                    ):
+                        try:
+                            meta[key] = int(value2)
+                        except ValueError, TypeError:
+                            meta[key] = 0
+                    elif key == "imghost":
+                        meta.imghost = value2
+                        meta.imghost_from_cli = True
                     elif key == "season":
                         meta.manual_season = value2
                     elif key == "episode":
@@ -762,55 +1063,12 @@ class Args:
                         meta.manual_date = value2
                     elif key == "tmdb_manual":
                         meta.category, meta.tmdb_manual = self.parse_tmdb_id(value2, meta.category)
-                    elif key == "ptp":
-                        if value2.startswith("http"):
-                            parsed = urllib.parse.urlparse(value2)
-                            try:
-                                meta.ptp = urllib.parse.parse_qs(parsed.query)["torrentid"][0]
-                            except Exception:
-                                logger.info("[red]Your terminal ate  part of the url, please surround in quotes next time, or pass only the torrentid")
-                                logger.info("[red]Continuing without -ptp")
-                        else:
-                            meta.ptp = value2
-                    elif key == "blu":
-                        if value2.startswith("http"):
-                            parsed = urllib.parse.urlparse(value2)
-                            try:
-                                blupath = parsed.path
-                                if blupath.endswith("/"):
-                                    blupath = blupath[:-1]
-                                meta.blu = blupath.split("/")[-1]
-                            except Exception:
-                                logger.info("[red]Unable to parse id from url")
-                                logger.info("[red]Continuing without --blu")
-                        else:
-                            meta.blu = value2
-                    elif key == "aither":
-                        if value2.startswith("http"):
-                            parsed = urllib.parse.urlparse(value2)
-                            try:
-                                aitherpath = parsed.path
-                                if aitherpath.endswith("/"):
-                                    aitherpath = aitherpath[:-1]
-                                meta.aither = aitherpath.split("/")[-1]
-                            except Exception:
-                                logger.info("[red]Unable to parse id from url")
-                                logger.info("[red]Continuing without --aither")
-                        else:
-                            meta.aither = value2
-                    elif key == "lst":
-                        if value2.startswith("http"):
-                            parsed = urllib.parse.urlparse(value2)
-                            try:
-                                lstpath = parsed.path
-                                if lstpath.endswith("/"):
-                                    lstpath = lstpath[:-1]
-                                meta.lst = lstpath.split("/")[-1]
-                            except Exception:
-                                logger.info("[red]Unable to parse id from url")
-                                logger.info("[red]Continuing without --lst")
-                        else:
-                            meta.lst = value2
+                    elif key == "tracker_id":
+                        for tracker_id_value in value_list:
+                            tracker_name, torrent_id = self.parse_tracker_id(tracker_id_value)
+                            meta.set_tracker_ids({tracker_name: torrent_id})
+                    elif key == "manual_cast":
+                        meta.manual_cast = [name.strip() for name in value2.split(",") if name.strip()]
                     elif key == "openlibrary":
                         if value2.startswith("http"):
                             parsed = urllib.parse.urlparse(value2)
@@ -827,105 +1085,6 @@ class Args:
                                 logger.info("[red]Continuing without --openlibrary")
                         else:
                             meta.openlibrary = value2
-                    elif key == "oe":
-                        if value2.startswith("http"):
-                            parsed = urllib.parse.urlparse(value2)
-                            try:
-                                oepath = parsed.path
-                                if oepath.endswith("/"):
-                                    oepath = oepath[:-1]
-                                meta.oe = oepath.split("/")[-1]
-                            except Exception:
-                                logger.info("[red]Unable to parse id from url")
-                                logger.info("[red]Continuing without --oe")
-                        else:
-                            meta.oe = value2
-                    elif key == "ulcx":
-                        if value2.startswith("http"):
-                            parsed = urllib.parse.urlparse(value2)
-                            try:
-                                ulcxpath = parsed.path
-                                if ulcxpath.endswith("/"):
-                                    ulcxpath = ulcxpath[:-1]
-                                meta.ulcx = ulcxpath.split("/")[-1]
-                            except Exception:
-                                logger.info("[red]Unable to parse id from url")
-                                logger.info("[red]Continuing without --ulcx")
-                        else:
-                            meta.ulcx = value2
-                    elif key == "hdb":
-                        if value2.startswith("http"):
-                            parsed = urllib.parse.urlparse(value2)
-                            try:
-                                meta.hdb = urllib.parse.parse_qs(parsed.query)["id"][0]
-                            except Exception:
-                                logger.info("[red]Your terminal ate  part of the url, please surround in quotes next time, or pass only the torrentid")
-                                logger.info("[red]Continuing without -hdb")
-                        else:
-                            meta.hdb = value2
-
-                    elif key == "btn":
-                        if value2.startswith("http"):
-                            parsed = urllib.parse.urlparse(value2)
-                            try:
-                                meta.btn = urllib.parse.parse_qs(parsed.query)["id"][0]
-                            except Exception:
-                                logger.info("[red]Your terminal ate  part of the url, please surround in quotes next time, or pass only the torrentid")
-                                logger.info("[red]Continuing without -hdb")
-                        else:
-                            meta.btn = value2
-
-                    elif key == "bhd":
-                        if value2.startswith("http"):
-                            parsed = urllib.parse.urlparse(value2)
-                            try:
-                                bhdpath = parsed.path
-                                if bhdpath.endswith("/"):
-                                    bhdpath = bhdpath[:-1]
-
-                                if "/download/" in bhdpath or "/torrents/" in bhdpath:
-                                    torrent_id_match = re.search(r"\.(\d+)$", bhdpath)
-                                    if torrent_id_match:
-                                        meta.bhd = torrent_id_match.group(1)
-                                    else:
-                                        meta.bhd = bhdpath.split("/")[-1]
-                                else:
-                                    meta.bhd = bhdpath.split("/")[-1]
-
-                                logger.info(f"[green]Parsed BEYONDHD torrent ID: {meta.bhd}")
-                            except Exception as e:
-                                logger.info(f"[red]Unable to parse id from url: {e}")
-                                logger.info("[red]Continuing without --bhd")
-                        else:
-                            meta.bhd = value2
-
-                    elif key == "orpheus":
-                        if value2.startswith("http"):
-                            parsed = urllib.parse.urlparse(value2)
-                            torrent_id = urllib.parse.parse_qs(parsed.query).get("torrentid", [""])[0]
-                            if torrent_id.isdigit():
-                                meta.orpheus = torrent_id
-                            else:
-                                logger.info("[red]Unable to parse torrentid from --orpheus URL; pass a torrent ID or permalink.[/red]")
-                        elif value2.isdigit():
-                            meta.orpheus = value2
-                        else:
-                            logger.info("[red]Invalid --orpheus value; pass a numeric torrent ID or permalink.[/red]")
-
-                    elif key == "huno":
-                        if value2.startswith("http"):
-                            parsed = urllib.parse.urlparse(value2)
-                            try:
-                                hunopath = parsed.path
-                                if hunopath.endswith("/"):
-                                    hunopath = hunopath[:-1]
-                                meta.huno = hunopath.split("/")[-1]
-                            except Exception:
-                                logger.info("[red]Unable to parse id from url")
-                                logger.info("[red]Continuing without --huno")
-                        else:
-                            meta.huno = value2
-
                     elif key == "steam_manual":
                         if value2.startswith("http"):
                             parsed = urllib.parse.urlparse(value2)
@@ -962,11 +1121,17 @@ class Args:
                 if isinstance(value, list):
                     value_list = [str(item) for item in value]
                     if len(value_list) == 1 and value_list[0] != "":
-                        meta[key] = int(value_list[0])
+                        try:
+                            meta[key] = int(value_list[0])
+                        except ValueError, TypeError:
+                            meta[key] = 0
                     else:
                         meta[key] = 0
                 elif value not in (None, [], 0, ""):
-                    meta[key] = int(str(value))
+                    try:
+                        meta[key] = int(str(value))
+                    except ValueError, TypeError:
+                        meta[key] = 0
                 else:
                     meta[key] = 0
             if key in ("manual_edition"):
@@ -995,22 +1160,36 @@ class Args:
                 if isinstance(value, list):
                     value_list = [str(item) for item in value]
                     if len(value_list) == 1 and value_list[0] != "":
-                        meta[key] = float(value_list[0])
+                        try:
+                            meta[key] = float(value_list[0])
+                        except ValueError, TypeError:
+                            meta[key] = None
                     else:
                         meta[key] = None
                 elif value not in (None, [], ""):
-                    meta[key] = float(str(value))
+                    try:
+                        meta[key] = float(str(value))
+                    except ValueError, TypeError:
+                        meta[key] = None
                 else:
                     meta[key] = None
-            if key in ("freeleech"):
+            if key in ("freeleech", "freeleech_until", "double_upload_until"):
                 if isinstance(value, list):
                     value_list = [str(item) for item in value]
                     if len(value_list) == 1 and value_list[0] != "":
-                        meta[key] = int(value_list[0])
+                        try:
+                            parsed_int = int(value_list[0])
+                            meta[key] = parsed_int if parsed_int >= 0 else 0
+                        except ValueError, TypeError:
+                            meta[key] = 0
                     else:
                         meta[key] = 0
                 elif value not in (None, [], 0, ""):
-                    meta[key] = int(str(value))
+                    try:
+                        parsed_int = int(str(value))
+                        meta[key] = parsed_int if parsed_int >= 0 else 0
+                    except ValueError, TypeError:
+                        meta[key] = 0
                 else:
                     meta[key] = 0
             if key in ["manual_episode_title"] and value == []:
@@ -1127,18 +1306,6 @@ class Args:
         if book_publisher_arg not in (None, ""):
             meta.publisher = str(book_publisher_arg).strip()
 
-        book_cover_arg = meta.book_cover
-        if book_cover_arg not in (None, "", []):
-            cover = " ".join(str(x) for x in book_cover_arg if str(x)).strip() if isinstance(book_cover_arg, list) else str(book_cover_arg).strip()
-            if cover.startswith(("http://", "https://")):
-                meta.artwork_url = cover
-            elif cover:
-                cover_path = Path(cover).expanduser()
-                if cover_path.is_file():
-                    meta.artwork_path = str(cover_path.resolve())
-                else:
-                    logger.warning("[yellow]BOOK: --book-cover is neither a public HTTP(S) URL nor an existing image file; ignoring it.[/yellow]")
-
         book_translator_arg = meta.book_translator
         if book_translator_arg not in (None, ""):
             meta.book_translator = str(book_translator_arg).strip()
@@ -1174,6 +1341,8 @@ class Args:
             meta.search_year = manual_year_arg
 
         # Detect newspapers in overridden titles
+        from src.book_prep import detect_newspaper, sanitize_book_author, sanitize_book_language
+
         detect_newspaper(meta)
         sanitize_book_language(meta)
         sanitize_book_author(meta)
@@ -1235,6 +1404,43 @@ class Args:
         except Exception:
             result = "None"
         return result
+
+    def parse_tracker_id(self, value: str) -> tuple[str, str]:
+        """Normalize ``--tracker-id`` values without exposing tracker-specific CLI flags."""
+        from src.meta import Meta
+        from src.trackersetup import get_tracker_comment_hosts, tracker_class_map
+
+        candidate = value.strip()
+        tracker_name = ""
+        id_value = candidate
+        if "=" in candidate and not candidate.startswith(("http://", "https://")):
+            tracker_name, id_value = (part.strip() for part in candidate.split("=", 1))
+            tracker_name = Meta.canonical_tracker_name(tracker_name)
+
+        if id_value.startswith(("http://", "https://")):
+            parsed = urllib.parse.urlparse(id_value)
+            host = (parsed.hostname or "").lower()
+            matched_trackers = [
+                name for name, domains in get_tracker_comment_hosts(self.config).items() if any(host == domain or host.endswith(f".{domain}") for domain in domains)
+            ]
+            if len(matched_trackers) != 1:
+                raise ValueError(f"--tracker-id URL host is unknown or ambiguous: {host or id_value}")
+            url_tracker = Meta.canonical_tracker_name(matched_trackers[0])
+            if tracker_name and tracker_name != url_tracker:
+                raise ValueError(f"--tracker-id tracker {tracker_name} does not match URL host {host}")
+            tracker_name = url_tracker
+            query = urllib.parse.parse_qs(parsed.query)
+            id_value = (query.get("torrentid") or query.get("id") or [""])[0]
+            if not id_value:
+                path = parsed.path.rstrip("/")
+                dotted_id = re.search(r"\.(\d+)$", path)
+                id_value = dotted_id.group(1) if dotted_id else path.split("/")[-1]
+
+        if tracker_name not in tracker_class_map:
+            raise ValueError(f"--tracker-id requires a supported tracker name, got: {tracker_name or value}")
+        if not id_value or not id_value.isdigit():
+            raise ValueError(f"--tracker-id requires a numeric torrent ID, got: {value}")
+        return tracker_name, id_value
 
     def parse_tmdb_id(self, id_str: str, category: str | None) -> tuple[str, int]:
         if category is None:

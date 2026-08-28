@@ -20,10 +20,12 @@ import httpx
 import langcodes
 from langcodes import tag_parser
 from torf import Torrent
+from unidecode import unidecode
 
 from src.bbcode import BBCODE
 from src.console import console, logger, prompt_in_thread
 from src.exportmi import export_info
+from src.genre_map import AUDIBLE_ENG_GENRE_MAP, AUDIBLE_PTBR_GENRE_MAP, ENG_TO_PTBR_GENRE_MAP
 from src.languages import languages_manager
 from src.meta import Meta
 from src.usenetcreate import verify_nzb_has_password
@@ -2542,8 +2544,8 @@ class Common:
             logger.info(f"Filename: {filename}")  # Ensure filename is printed if available
 
         if not meta.unattended:
-            selection = (await prompt_in_thread(cli_ui.ask_string, f"Do you want to use these IDs from {tracker_name}? (Y/n): ", default="") or "").strip().lower()
             try:
+                selection = (await prompt_in_thread(cli_ui.ask_string, f"Do you want to use these IDs from {tracker_name}? (Y/n): ", default="") or "").strip().lower()
                 return selection == "" or selection == "y" or selection == "yes"
             except KeyboardInterrupt, EOFError:
                 sys.exit(1)
@@ -2622,6 +2624,8 @@ class Common:
         id: str | int | None = None,
         file_name: str | list[str] | None = None,
         skip_tracker_descriptions: bool = False,
+        public_torrent_url: str | None = None,
+        region_resolver: Callable[[Any], Any] | None = None,
     ) -> tuple[
         int | None,
         int | None,
@@ -2660,7 +2664,10 @@ class Common:
         # Make the GET request with proper encoding handled by 'params'
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
-                logger.info(f"Searching for information on [bold cyan]{tracker}[/bold cyan]")
+                if id and public_torrent_url:
+                    logger.info(f"Searching for information on [bold cyan]{tracker.title()}[/bold cyan] ({public_torrent_url.rstrip('/')}/{id})")
+                else:
+                    logger.info(f"Searching for information on [bold cyan]{tracker}[/bold cyan]")
                 response = await client.get(url=url, params=params, headers=headers)
                 json_response = response.json()
         except (httpx.RequestError, httpx.TimeoutException) as e:
@@ -2693,7 +2700,7 @@ class Common:
                 imdb = 0 if imdb == 0 else imdb
                 if not meta.region and meta.is_disc in ("BDMV", "DVD"):
                     region_id = attributes.get("region_id")
-                    region_name = await self.unit3d_region_ids(reverse=True, region_id=region_id)
+                    region_name = await region_resolver(region_id) if region_resolver else await self.unit3d_region_ids(reverse=True, region_id=region_id)
                     if region_name:
                         meta.region = region_name
                 if not meta.distributor and meta.is_disc in ("BDMV", "DVD"):
@@ -2720,7 +2727,7 @@ class Common:
                     imdb = 0 if imdb == 0 else imdb
                     if not meta.region and meta.is_disc in ("BDMV", "DVD"):
                         region_id = attributes.get("region_id")
-                        region_name = await self.unit3d_region_ids(reverse=True, region_id=region_id)
+                        region_name = await region_resolver(region_id) if region_resolver else await self.unit3d_region_ids(reverse=True, region_id=region_id)
                         if region_name:
                             meta.region = region_name
                     if not meta.distributor and meta.is_disc in ("BDMV", "DVD"):
@@ -2754,9 +2761,11 @@ class Common:
                     logger.info(f"[green]Successfully grabbed description from {tracker}")
                     logger.info(f"Extracted description: \n\n{description}\n\n", extra={"markup": False, "highlighter": None})
 
-                    from src.trackersetup import api_trackers
-
-                    if meta.unattended or any(meta.get(t.lower()) for t in api_trackers):
+                    # A tracker ID only identifies the source of this metadata.  It
+                    # must not suppress the interactive review of the description.
+                    # Candidate collection sets ``unattended`` explicitly and is
+                    # therefore still non-interactive.
+                    if meta.unattended:
                         return tmdb, imdb, tvdb, mal, description, category, infohash, imagelist, file_name
                     logger.info("[cyan]Do you want to edit, discard or keep the description?[/cyan]")
                     edit_choice = cli_ui.ask_string("Enter 'e' to edit, 'd' to discard, or press Enter to keep it as is:")
@@ -3434,3 +3443,74 @@ class Common:
         combined_regex = "|".join(bdinfo_pattern)
 
         return bool(re.search(combined_regex, content, re.IGNORECASE))
+
+    async def get_portuguese_tags(
+        self,
+        meta: Meta,
+        tracker: str,
+        tmdb_data: dict[str, Any] | None = None,
+    ) -> str:
+        """
+        Map genres from meta.genres, meta.keywords, or TMDB to Portuguese tags formatted with dots."
+
+        BJSHARE rejects more than 5 tags, so we limit the output to 5 tags.
+        """
+        matched_tags: list[str] = []
+
+        genres_list = meta.genres or meta.keywords or []
+        for genre in genres_list:
+            genre_lower = genre.strip().lower()
+            if not genre_lower:
+                continue
+
+            mapped_list: list[str] = []
+            if mapped := ENG_TO_PTBR_GENRE_MAP.get(genre_lower):
+                mapped_list.append(mapped)
+            elif genre_lower in ENG_TO_PTBR_GENRE_MAP.values():
+                mapped_list.append(genre_lower)
+            elif mapped_audible := AUDIBLE_PTBR_GENRE_MAP.get(genre_lower):
+                mapped_list.extend(mapped_audible)
+            elif any(genre_lower in vals for vals in AUDIBLE_PTBR_GENRE_MAP.values()):
+                mapped_list.append(genre_lower)
+            elif mapped_aud_eng := AUDIBLE_ENG_GENRE_MAP.get(genre_lower):
+                for p in mapped_aud_eng:
+                    if p_mapped := ENG_TO_PTBR_GENRE_MAP.get(p):
+                        mapped_list.append(p_mapped)
+                    else:
+                        mapped_list.append(p)
+            elif meta.category == "BOOK":
+                mapped_list.append(genre_lower)
+
+            for m in mapped_list:
+                if m and m not in matched_tags:
+                    matched_tags.append(m)
+
+        if meta.category in ("TV", "MOVIE") and not matched_tags and tmdb_data:
+            genres_data: list[dict[str, Any]] = tmdb_data.get("genres", [])
+            for g in genres_data:
+                name = str(g.get("name", "")).lower().strip()
+                if name:
+                    mapped = ENG_TO_PTBR_GENRE_MAP.get(name) or (name if name in ENG_TO_PTBR_GENRE_MAP.values() else None)
+                    if mapped and mapped not in matched_tags:
+                        matched_tags.append(mapped)
+
+        # If we have matched tags, return them
+        if matched_tags:
+            formatted_tags = [unidecode(t.strip()).replace(" ", ".") for t in matched_tags if t.strip()]
+            return ", ".join(formatted_tags[:5])
+
+        if meta.category == "XXX":
+            return "adulto"
+
+        if meta.category not in ("GAME", "TV", "MOVIE"):
+            return ""
+
+        # Final fallback: ask user
+        if meta.unattended and not meta.unattended_confirm:
+            logger.info(f"{tracker}: [yellow]Unattended mode: Gêneros não encontrados. Pulando upload para {tracker}.[/yellow]")
+            meta.skipping = f"{tracker}"
+            return ""
+
+        tags_raw = await prompt_in_thread(cli_ui.ask_string, f"Digite os gêneros (no formato do {tracker}): ")
+        raw_list = [unidecode(t.strip()).replace(" ", ".") for t in re.split(r"[,;]", tags_raw or "") if t.strip()]
+        return ", ".join(raw_list[:5])

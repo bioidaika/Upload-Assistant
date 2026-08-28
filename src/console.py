@@ -1,10 +1,12 @@
 # Upload Assistant © 2025 Audionut & wastaken7 — Licensed under UAPL v1.0
 import asyncio
+import builtins
 import contextlib
 import contextvars
 import logging
 import os
 import re
+import sys
 import threading
 from collections.abc import AsyncGenerator, Callable, Generator
 from pathlib import Path
@@ -14,6 +16,28 @@ from rich.console import Console
 from rich.logging import RichHandler
 from rich.progress import Progress
 from rich.text import Text
+
+_original_input = builtins.input
+
+
+def _safe_input(prompt: str = "") -> str:
+    """Thread-safe input that avoids readline terminal state corruption.
+
+    When `readline` is imported, calling `input()` in a background thread makes it
+    vulnerable to terminal state corruption (like losing echo) if a SIGWINCH occurs
+    (e.g., when resizing the terminal or switching windows). Bypassing `readline`
+    by using `sys.stdin.readline` natively fixes this at the cost of history and
+    advanced editing commands, which aren't needed for our CLI prompts.
+    """
+    sys.stdout.write(prompt)
+    sys.stdout.flush()
+    line = sys.stdin.readline()
+    if not line:
+        raise EOFError
+    return line.rstrip("\n")
+
+
+builtins.input = _safe_input
 
 
 def ansi_to_html(ansi_chunk: str, width: int = 120) -> str:
@@ -72,22 +96,40 @@ console = Console(
 _live_progress_lock = threading.Lock()
 _shared_progress: Progress | None = None
 _shared_progress_users = 0
-_suppress_cli_progress = contextvars.ContextVar("suppress_cli_progress", default=False)
+
+
+class CliProgressGate:
+    """A hidden progress display that can become visible after CLI prompts."""
+
+    def __init__(self) -> None:
+        self.progress: Progress | None = None
+        self.users = 0
+        self.released = False
+
+    def release(self) -> None:
+        with _live_progress_lock:
+            self.released = True
+            if self.progress is not None:
+                self.progress.start()
+
+
+_cli_progress_gate = contextvars.ContextVar[CliProgressGate | None]("cli_progress_gate", default=None)
 
 
 @contextlib.contextmanager
-def suppress_cli_progress() -> Generator[None]:
+def suppress_cli_progress(gate: CliProgressGate | None = None) -> Generator[None]:
     """Temporarily hide terminal progress while background preparation runs."""
-    token = _suppress_cli_progress.set(True)
+    token = _cli_progress_gate.set(gate or CliProgressGate())
     try:
         yield
     finally:
-        _suppress_cli_progress.reset(token)
+        _cli_progress_gate.reset(token)
 
 
 def is_cli_progress_suppressed() -> bool:
     """Return whether the current task should avoid rendering terminal progress."""
-    return _suppress_cli_progress.get()
+    gate = _cli_progress_gate.get()
+    return gate is not None and not gate.released
 
 
 @contextlib.contextmanager
@@ -95,10 +137,12 @@ def progress_display(*columns: Any, **kwargs: Any) -> Generator[Progress]:
     """Yield a progress panel that safely shares the console's single Live display."""
     global _shared_progress, _shared_progress_users
 
-    requested_disabled = bool(kwargs.get("disable", False)) or is_cli_progress_suppressed()
-    if requested_disabled:
-        kwargs["disable"] = True
-    shared = not requested_disabled
+    gate = _cli_progress_gate.get()
+    explicitly_disabled = bool(kwargs.get("disable", False))
+    gated = gate is not None and not explicitly_disabled
+    shared = gate is None and not explicitly_disabled
+    if gated:
+        kwargs.pop("disable", None)
     if shared:
         with _live_progress_lock:
             if _shared_progress is None:
@@ -107,7 +151,16 @@ def progress_display(*columns: Any, **kwargs: Any) -> Generator[Progress]:
                 _shared_progress = new_progress
             progress = _shared_progress
             _shared_progress_users += 1
+    elif gated:
+        with _live_progress_lock:
+            if gate.progress is None:
+                gate.progress = Progress(*columns, **kwargs)
+                if gate.released:
+                    gate.progress.start()
+            progress = gate.progress
+            gate.users += 1
     else:
+        kwargs["disable"] = True
         progress = Progress(*columns, **kwargs)
         progress.start()
 
@@ -120,6 +173,12 @@ def progress_display(*columns: Any, **kwargs: Any) -> Generator[Progress]:
                 if _shared_progress_users == 0 and _shared_progress is not None:
                     _shared_progress.stop()
                     _shared_progress = None
+        elif gated:
+            with _live_progress_lock:
+                gate.users -= 1
+                if gate.users == 0 and gate.progress is not None:
+                    gate.progress.stop()
+                    gate.progress = None
         else:
             progress.stop()
 
@@ -159,13 +218,39 @@ class LogBufferHandler(logging.Handler):
         self.buffer.append(record)
 
 
-_log_buffer_lock = asyncio.Lock()
+_log_buffer_lock: asyncio.Lock | None = None
+_log_buffer_loop: asyncio.AbstractEventLoop | None = None
+_log_buffer_state_lock = threading.Lock()
+
+
+def _get_log_buffer_lock() -> asyncio.Lock:
+    """Return a lock owned by the active event loop.
+
+    The Web UI runs each in-process upload with a fresh ``asyncio.run`` call.
+    Asyncio locks cannot be reused after they have been bound to an earlier
+    event loop, so replace the lock once that earlier loop has stopped.
+    """
+    global _log_buffer_lock, _log_buffer_loop
+
+    current_loop = asyncio.get_running_loop()
+    with _log_buffer_state_lock:
+        if _log_buffer_loop is not current_loop:
+            if _log_buffer_loop is not None and _log_buffer_loop.is_running():
+                raise RuntimeError("Console log buffering cannot span concurrent event loops")
+            _log_buffer_loop = current_loop
+            _log_buffer_lock = None
+
+        lock = _log_buffer_lock
+        if lock is None:
+            lock = asyncio.Lock()
+            _log_buffer_lock = lock
+        return lock
 
 
 @contextlib.asynccontextmanager
 async def buffer_console_logs() -> AsyncGenerator[None]:
     """Temporarily hold console log output in memory while user prompts are active."""
-    async with _log_buffer_lock:
+    async with _get_log_buffer_lock():
         root_logger = logger
         original_rich_handlers = [h for h in root_logger.handlers if isinstance(h, RichHandler)]
         buffer_handler = LogBufferHandler()

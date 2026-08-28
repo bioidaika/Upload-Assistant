@@ -40,7 +40,22 @@ class TrackerStatusManager:
         await AvistaZNetworkRouter(self.config, tracker_class_map).apply(meta)
         helper: Any = UploadHelper(self.config)
         dupe_checker = DupeChecker(self.config)
-        if any(tracker in meta.trackers for tracker in ["MTEAM", "LAJIDUI", "PTFANS", "PTGTK", "RAILGUNPT"]):
+        if any(
+            tracker in meta.trackers
+            for tracker in [
+                "1PTBA",
+                "LAJIDUI",
+                "LEMONHD",
+                "LONGPT",
+                "MTEAM",
+                "PTCAFE",
+                "PTFANS",
+                "PTGTK",
+                "PTZONE",
+                "RAILGUNPT",
+                "XINGYUNGEPT",
+            ]
+        ):
             meta.douban_id = await get_douban_id(meta)
         meta_lock = asyncio.Lock()
         status_map = meta.tracker_status
@@ -49,8 +64,8 @@ class TrackerStatusManager:
                 status_map[tracker] = {}
 
         # Prompt for IMDB ID once if any tracker needs it and it's missing in attended mode
-        if not meta.get("unattended", False) and meta.get("imdb_id", 0) == 0:
-            needs_imdb = any(t in meta.trackers for t in {"TORRENTHR", "PASSTHEPOPCORN"})
+        if not meta.get("unattended", False) and not meta.get("no_imdb", False) and meta.get("imdb_id", 0) == 0:
+            needs_imdb = "PASSTHEPOPCORN" in meta.trackers
             if needs_imdb:
                 while True:
                     try:
@@ -93,7 +108,7 @@ class TrackerStatusManager:
 
             if tracker_name in tracker_class_map:
                 tracker_class = tracker_class_map[tracker_name](config=self.config)
-                if tracker_name in {"TORRENTHR", "PASSTHEPOPCORN"} and local_meta.get("imdb_id", 0) == 0:
+                if tracker_name == "PASSTHEPOPCORN" and local_meta.get("imdb_id", 0) == 0:
                     local_tracker_status["skipped"] = True
 
                 if not local_tracker_status["skipped"]:

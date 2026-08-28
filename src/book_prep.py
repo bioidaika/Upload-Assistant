@@ -21,6 +21,9 @@ from urllib.parse import urlparse
 import langcodes
 
 from src.book_extractors import (
+    extract_audiobook_series_from_title as _extract_audiobook_series_from_title,
+)
+from src.book_extractors import (
     extract_cbr_cbz_metadata as _extract_cbr_cbz_metadata,
 )
 from src.book_extractors import (
@@ -43,6 +46,7 @@ from src.book_extractors import (
 )
 from src.console import logger
 from src.exportmi import export_info
+from src.genre_map import map_audiobook_keywords
 from src.meta import Meta
 
 # ---------------------------------------------------------------------------
@@ -87,8 +91,8 @@ def resolve_book_filelist(
 
     Returns:
         A 4-tuple ``(videopath, filelist, search_term, search_file_folder)``
-        where *videopath* is the primary/largest file used as the "video"
-        reference for downstream processing.
+        where *videopath* is the primary file used as the "video" reference
+        for downstream processing (the largest audio file for audiobooks).
     """
     allowed_extensions = BOOK_EXTENSIONS | AUDIOBOOK_EXTENSIONS
 
@@ -106,16 +110,15 @@ def resolve_book_filelist(
         richer_book_files = [file for file in filelist if Path(file).suffix.lower() in BOOK_EXTENSIONS - {".txt", ".html", ".htm"}]
         if richer_book_files:
             filelist = [file for file in filelist if not (Path(file).suffix.lower() in {".txt", ".html", ".htm"} and Path(file).stem.casefold() in _TEXT_SIDECAR_STEMS)]
-        videopath = sorted(filelist, key=os.path.getsize, reverse=True)[0]
     else:
-        videopath = videoloc
         filelist.append(videoloc)
 
     meta.filelist = filelist
     meta.imdb_id = 0
 
-    primary_ext = Path(videopath).suffix.lower()
-    meta.audiobook = bool(meta.audiobook or (primary_ext in AUDIOBOOK_EXTENSIONS) or any(Path(f).suffix.lower() in AUDIOBOOK_EXTENSIONS for f in filelist))
+    audio_files = [file for file in filelist if Path(file).suffix.lower() in AUDIOBOOK_EXTENSIONS]
+    meta.audiobook = bool(meta.audiobook or audio_files)
+    videopath = max(audio_files if meta.audiobook and audio_files else filelist, key=os.path.getsize)
 
     search_term = Path(filelist[0]).name if filelist else ""
     search_file_folder = "file"
@@ -195,6 +198,11 @@ def _unescape_meta_val(val: Any) -> str | None:
     import html
 
     return html.unescape(str(val)).strip()
+
+
+def _is_chapter_title(value: str | None) -> bool:
+    """Return whether a MediaInfo title is only an audiobook chapter label."""
+    return bool(value and re.fullmatch(r"(?:cap[ií]tulo|chapter)\s+\d+(?:\.\d+)?", value.strip(), re.IGNORECASE))
 
 
 async def gather_book_prep(
@@ -330,15 +338,22 @@ async def gather_book_prep(
     if meta.mediainfo:
         try:
             tracks = meta.mediainfo.get("media", {}).get("track", [])
+            if not isinstance(tracks, list):
+                tracks = []
+            # Filter to only dictionary entries to prevent errors when calling .get() later
+            tracks = [t for t in tracks if isinstance(t, dict)]
             general_track = next((t for t in tracks if t.get("@type") == "General"), None)
             if general_track:
                 # 1. Title/Album
                 album = _unescape_meta_val(general_track.get("Album") or general_track.get("album"))
                 track_name = _unescape_meta_val(general_track.get("Track_name") or general_track.get("track_name"))
+                title_tag = _unescape_meta_val(general_track.get("Title") or general_track.get("title"))
+                if _is_chapter_title(title_tag) and album and not _is_chapter_title(album):
+                    title_tag = album
 
                 # Detect if the audiobook is Unabridged or Abridged from file metadata
                 detected_edition = None
-                for val in (album, track_name):
+                for val in (title_tag, track_name, album):
                     if val:
                         match = re.search(r"\b(unabridged|abridged)\b", val, re.IGNORECASE)
                         if match:
@@ -348,10 +363,7 @@ async def gather_book_prep(
                     meta.edition = detected_edition
 
                 if not meta.title:
-                    if album:
-                        meta.title = album
-                    elif track_name:
-                        meta.title = track_name
+                    meta.title = title_tag or track_name or album or ""
 
                 # Clean the edition from the title if it's not a CLI override
                 if not cli_overrides["title"] and meta.title:
@@ -407,6 +419,17 @@ async def gather_book_prep(
                         if part_val and not meta.book_series_index:
                             meta.book_series_index = _normalize_series_index(part_val)
 
+                if not cli_overrides["title"] and meta.title:
+                    original_title = meta.title
+                    parsed_title, parsed_series, parsed_index = _extract_audiobook_series_from_title(original_title)
+                    if parsed_series:
+                        meta.title = parsed_title
+                        localized_history_series = re.search(r":\s*Hist[oó]ria\s+\d+(?:\.\d+)?\s+de\s+.+$", original_title, re.IGNORECASE)
+                        if localized_history_series or not meta.book_series:
+                            meta.book_series = parsed_series
+                        if parsed_index and (localized_history_series or not meta.book_series_index):
+                            meta.book_series_index = parsed_index
+
                 # 6. Overview/Comment
                 comment = _unescape_meta_val(general_track.get("Comment") or general_track.get("comment"))
                 description = _unescape_meta_val(general_track.get("Description") or general_track.get("description"))
@@ -427,8 +450,7 @@ async def gather_book_prep(
                 # 8. Genre -> Keywords
                 genre = _unescape_meta_val(general_track.get("Genre") or general_track.get("genre"))
                 if genre:
-                    words = re.split(r"[;,]", genre)
-                    cleaned_words = [w.strip().lower() for w in words if w.strip()]
+                    cleaned_words = map_audiobook_keywords(genre)
                     if cleaned_words:
                         existing_keywords = meta.keywords
                         existing_list: list[str] = []
@@ -670,9 +692,29 @@ async def gather_book_prep(
         if avg_bitrate is not None:
             meta.audiobook_bitrate = avg_bitrate
 
+        if meta.keywords:
+            meta.keywords = map_audiobook_keywords(meta.keywords)
+
+    if meta.audiobook:
+        meta.title = normalize_audiobook_title(meta.title, meta.book_series)
+
     detect_newspaper(meta)
     sanitize_book_language(meta)
     sanitize_book_author(meta)
+
+
+def normalize_audiobook_title(title: str, series: str) -> str:
+    """Remove a repeated series name from the beginning or end of an audiobook title."""
+    title = title.strip()
+    series = series.strip()
+    if not series:
+        return title
+    if len(title) > len(series):
+        if title.casefold().endswith(series.casefold()):
+            return title[: -len(series)].rstrip(" :-\u2013\u2014")
+        if title.casefold().startswith(series.casefold()):
+            return title[len(series) :].lstrip(" :-\u2013\u2014")
+    return title
 
 
 def detect_newspaper(meta: Meta) -> None:
@@ -792,7 +834,7 @@ def detect_newspaper(meta: Meta) -> None:
 
 async def get_audiobook_duration(filelist: list[str]) -> tuple[float, str]:
     """Calculate the sum of durations of all audio files in the file list using MediaInfo."""
-    from pymediainfo import MediaInfo
+    from src.mediainfo import MediaInfo
 
     audio_files = [f for f in filelist if Path(f).suffix.lower() in AUDIOBOOK_EXTENSIONS]
 
@@ -827,7 +869,7 @@ async def get_audiobook_duration(filelist: list[str]) -> tuple[float, str]:
 
 async def get_audiobook_bitrate(filelist: list[str]) -> int | None:
     """Calculate the average bitrate (in kbps) of a sample of audio files (max 5) in the file list using MediaInfo."""
-    from pymediainfo import MediaInfo
+    from src.mediainfo import MediaInfo
 
     audio_files = [f for f in filelist if Path(f).suffix.lower() in AUDIOBOOK_EXTENSIONS]
 

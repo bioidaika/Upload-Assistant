@@ -9,7 +9,6 @@ def make_meta(**overrides):
         "category": "MOVIE",
         "adult_media": False,
         "tmdb_adult_media": False,
-        "nsfw": False,
         "is_disc": "",
         "container": "MKV",
         "video_codec": "H.264",
@@ -30,6 +29,7 @@ def make_meta(**overrides):
         "subtitle_files": [],
         "mediainfo": {"media": {"track": []}},
         "hardcoded_subs": False,
+        "original_language": "en",
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -56,6 +56,10 @@ def test_rejects_hevc_and_blu_ray_structures():
 
 def test_rejects_missing_subtitles():
     assert not asyncio.run(tracker().get_additional_checks(make_meta(subtitle_languages=[])))  # noqa: S101
+
+
+def test_accepts_portuguese_original_language_without_subtitles():
+    assert asyncio.run(tracker().get_additional_checks(make_meta(subtitle_languages=[], original_language="pt")))  # noqa: S101
 
 
 def test_accepts_hardcoded_subtitles_without_a_language_tag():

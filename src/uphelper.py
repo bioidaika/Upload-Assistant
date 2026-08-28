@@ -1,6 +1,7 @@
 # Upload Assistant © 2025 Audionut & wastaken7 — Licensed under UAPL v1.0
 import asyncio
 import contextlib
+import contextvars
 import json
 import re
 import sys
@@ -20,6 +21,8 @@ from src.config_helpers import format_terminal_link
 from src.console import logger, prompt_in_thread
 from src.meta import Meta
 from src.trackersetup import tracker_class_map
+
+_dupe_prompt_lock_held = contextvars.ContextVar("dupe_prompt_lock_held", default=False)
 
 DupeEntry = dict[str, Any]
 
@@ -252,10 +255,21 @@ class UploadHelper:
 
     async def prompt_yes_no(self, question: str, *, default: bool = False) -> bool:
         """Ask one interactive question at a time without blocking the event loop."""
+        if _dupe_prompt_lock_held.get():
+            return await prompt_in_thread(cli_ui.ask_yes_no, question, default=default)
         async with self._prompt_lock:
             return await prompt_in_thread(cli_ui.ask_yes_no, question, default=default)
 
     async def dupe_check(self, dupes: list[DupeEntry | str], meta: Meta, tracker_name: str) -> tuple[bool, Meta]:
+        """Show duplicate results and their confirmation as one atomic console interaction."""
+        async with self._prompt_lock:
+            token = _dupe_prompt_lock_held.set(True)
+            try:
+                return await self._dupe_check(dupes, meta, tracker_name)
+            finally:
+                _dupe_prompt_lock_held.reset(token)
+
+    async def _dupe_check(self, dupes: list[DupeEntry | str], meta: Meta, tracker_name: str) -> tuple[bool, Meta]:
         def _format_dupe(entry: DupeEntry | str) -> str:
             if isinstance(entry, dict):
                 name = str(entry.get("name", ""))
@@ -508,7 +522,7 @@ class UploadHelper:
         if not possible:
             return
 
-        question = "[bold magenta]Found BDInfo content in potential duplicates.[/bold magenta] Perform a comparison?"
+        question = "Found BDInfo content in potential duplicates. Perform a comparison?"
         if await self.prompt_yes_no(question, default=True):
             warnings: list[str] = []
             results: list[str] = []
@@ -544,6 +558,7 @@ class UploadHelper:
         lines.append(("Title", f"{meta.title} ({meta.year})"))
         lines.append(("Category", meta.category))
         edition = meta.edition
+        keywords = ", ".join(meta.keywords) if meta.keywords else ""
 
         # BOOK
         if meta.category == "BOOK":
@@ -581,12 +596,13 @@ class UploadHelper:
             lines.append(("Cover", poster))
 
         elif meta.category == "GAME":
-            notes = meta.description_link or meta.description_file or ""
-            if notes:
+            notes = "Inline description provided" if meta.description_inline else ""
+            if not notes:
+                notes = meta.description_link or meta.description_file or ""
                 # don't leak links or file paths
                 notes = notes[:16] if notes.startswith("http") else f"./{Path(notes).name}"
             if meta.platform == "PC":
-                notes = notes if notes else "[yellow][italic]Installation instructions missing. Use -df or -dp to add them.[/italic][/yellow]"
+                notes = notes if notes else "[yellow][italic]Installation instructions missing. Use --description, -df, or -pb to add them.[/italic][/yellow]"
 
             game_subcategory_str = {"full_game": "Full Game", "full_game_dlc": "Full Game + DLC", "dlc": "DLC", "update": "Update"}.get(meta.game_subcategory, "Unknown")
             game_subcategory = f"[italic]{meta.game_subcategory}[/italic] ({game_subcategory_str})"
@@ -629,6 +645,8 @@ class UploadHelper:
             if meta.category == "TV" and not meta.tv_pack and meta.overview_meta:
                 lines.append(("Episode overview:", meta.overview_meta[:60] + "...."))
             lines.append(("Genre", ", ".join(meta.genres)))
+            if meta.category == "BOOK":
+                lines.append(("Keywords", keywords))
             if meta.demographic != "":
                 lines.append(("Demographic", meta.demographic))
 
@@ -639,7 +657,7 @@ class UploadHelper:
             if meta.tvdb_id or 0 != 0:
                 lines.append(("TVDB", f"https://www.thetvdb.com/?id={meta.tvdb_id}&tab=series"))
             if meta.tvmaze_id or 0 != 0:
-                lines.append(("TVMaze", f"https://www.thetvmaze.com/shows/{meta.tvmaze_id}"))
+                lines.append(("TVMaze", f"https://www.tvmaze.com/shows/{meta.tvmaze_id}"))
             if meta.mal_id or 0 != 0:
                 lines.append(("MAL", f"https://myanimelist.net/anime/{meta.mal_id}"))
 

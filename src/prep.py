@@ -6,11 +6,15 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
+from src.artwork import prepare_artwork
 from src.cogs.redaction import PathAwareEncoder
 from src.meta import Meta
 from src.metadata_cache import set_run_disabled
+from src.screenshot_manifest import files as manifest_files
 
 console: Any = None
+
+_FRAME_OVERLAY_FORBIDDEN_TRACKERS = frozenset({"AVISTAZ", "CINEMAZ", "PRIVATEHD"})
 
 try:
     import re
@@ -50,6 +54,26 @@ except ModuleNotFoundError:
     raise SystemExit(1) from None
 except KeyboardInterrupt:
     exit()
+
+
+async def populate_hdr_for_early_capture(meta: Meta, mi: dict[str, Any] | None, bdinfo: dict[str, Any] | None) -> None:
+    """Populate HDR before category detection starts asynchronous screenshot capture."""
+    if meta.hdr or not (mi or bdinfo):
+        return
+    meta.hdr = await prep_helpers.video_manager.get_hdr(mi or {}, bdinfo)
+
+
+def _frame_overlay_requires_late_capture(meta: Meta, config: dict[str, Any]) -> bool:
+    """Defer overlays until tracker upload eligibility is known."""
+    if not meta.frame_overlay:
+        return False
+
+    selected = meta.trackers or config.get("TRACKERS", {}).get("default_trackers", "")
+    if isinstance(selected, str):
+        tracker_names = {tracker.strip().upper() for tracker in selected.split(",") if tracker.strip()}
+    else:
+        tracker_names = {str(tracker).strip().upper() for tracker in selected if str(tracker).strip()}
+    return bool(tracker_names & _FRAME_OVERLAY_FORBIDDEN_TRACKERS)
 
 
 class Prep:
@@ -158,16 +182,23 @@ class Prep:
             await prep_helpers.process_trackers_and_torrent(self, meta, client, hash_ids, tracker_ids, "", "")
             await _enrich_music_from_orpheus_fn(meta, self.config)
             await _enrich_music_from_discogs_fn(meta, self.config)
+            await prepare_artwork(meta)
             logger.debug(f"Music metadata processed in {time.time() - meta_start_time:.2f} seconds")
             return meta
 
         # 3. File information and basic media processing
         filename, untouched_filename, videopath, search_term, search_file_folder, mi, video = await prep_helpers.process_media_files(self, meta, videoloc, bdinfo)
 
+        if meta.category == "XXX" and meta.screens > 0:
+            _rows, _columns, max_videos = (
+                self.takescreens_manager.xxx_contact_sheet_settings() if hasattr(self.takescreens_manager, "xxx_contact_sheet_settings") else (12, 5, 6)
+            )
+            meta.screens = min(len(meta.filelist or []), max_videos)
+
         # HDR is normally finalized after the metadata searches, but ffmpeg
         # needs it while the early capture is running (for optional tonemapping).
-        if meta.category in ("TV", "MOVIE") and not meta.hdr:
-            meta.hdr = await prep_helpers.video_manager.get_hdr(mi or {}, bdinfo)
+        # Category detection occurs later, so it must not gate this early probe.
+        await populate_hdr_for_early_capture(meta, mi, bdinfo)
 
         # Screenshot capture is CPU/IO-heavy and independent from the metadata
         # requests below. Start it with a snapshot so ffmpeg can run while the
@@ -175,7 +206,7 @@ class Prep:
         # When description images are enabled, however, tracker metadata may
         # satisfy cutoff_screens. Do not generate local frames that would then
         # be discarded solely because that lookup has not completed yet.
-        early_screenshots_task: asyncio.Task[None] | None = None
+        early_screenshots_task: asyncio.Task[Meta | None] | None = None
         if not meta.keep_images:
             early_screenshots_task = asyncio.create_task(self._capture_early_screenshots(meta.copy(), filename, videopath, bdinfo))
         else:
@@ -202,16 +233,31 @@ class Prep:
         # 8. Set Final Metadata and tags
         await prep_helpers.finalize_metadata(self, meta, videopath, bdinfo, mi, filename, untouched_filename, video)
 
+        await prepare_artwork(meta)
+
+        if meta.category == "XXX":
+            await self.takescreens_manager.xxx_fallback_cover(meta.filelist or [], meta.uuid, meta.base_dir, meta)
+
         await languages_manager.process_desc_language(meta)
 
         # Ensure the background capture is complete before the upload stage
         # starts consuming the generated files. Any error is logged by the
         # helper; the existing upload-stage capture remains the fallback.
         if early_screenshots_task is not None:
-            await early_screenshots_task
+            early_meta = await early_screenshots_task
+            if early_meta is not None:
+                if early_meta.tonemapped:
+                    meta.tonemapped = True
+                if early_meta.libplacebo:
+                    meta.libplacebo = True
+                if getattr(early_meta, "frame_info_map", None):
+                    meta.frame_info_map = early_meta.frame_info_map
+        if meta.category == "XXX":
+            meta.screens = len(manifest_files(meta.base_dir, meta.uuid, "main"))
 
         if meta.category == "BOOK":
             await self.rehost_images_manager.takescreens_manager.prepare_book_cover(videopath, meta.uuid, meta.base_dir, meta)
+            await prepare_artwork(meta)
             meta_path = Path(f"{meta.base_dir}{'/' + 'tmp' + '/'}{meta.uuid}/meta.json")
             meta_path.parent.mkdir(parents=True, exist_ok=True)
             async with aiofiles.open(meta_path, "w", encoding="utf-8") as meta_file:
@@ -221,12 +267,15 @@ class Prep:
 
         return meta
 
-    async def _capture_early_screenshots(self, meta: Meta, filename: str, videopath: str, bdinfo: dict[str, Any]) -> None:
+    async def _capture_early_screenshots(self, meta: Meta, filename: str, videopath: str, bdinfo: dict[str, Any]) -> Meta | None:
         """Generate local screenshots while metadata and tracker IDs are fetched."""
         if meta.keep_images:
-            return
+            return None
         if meta.category in ("MUSIC", "GAME", "BOOK") or meta.screens <= 0:
-            return
+            return None
+        if _frame_overlay_requires_late_capture(meta, self.config):
+            logger.debug("[cyan]Deferring frame-overlay screenshots until tracker upload eligibility is known.[/cyan]")
+            return None
 
         try:
             if meta.is_disc == "BDMV":
@@ -295,6 +344,8 @@ class Prep:
                     retry_cap=False,
                     cleanup_after_capture=False,
                 )
+            elif meta.category == "XXX":
+                await self.takescreens_manager.xxx_contact_sheets(meta.filelist or [], meta.uuid, meta.base_dir, meta)
             elif videopath:
                 await self.takescreens_manager.screenshots(
                     videopath,
@@ -307,12 +358,16 @@ class Prep:
                     capture_group="main",
                 )
             logger.debug("[cyan]Early screenshot generation completed.[/cyan]")
+            return meta
         except asyncio.CancelledError:
             raise
         except Exception as error:
             logger.warning(f"[yellow]Early screenshot generation failed; upload stage will retry: {error}[/yellow]")
+            return None
 
-    def check_adult_media(self, meta) -> bool:
+    def check_adult_media(self, meta: Meta) -> bool:
+        if meta.category == "XXX":
+            return True
         adult_keywords = ["xxx", "erotic", "porn", "adult", "orgy"]
         if meta.tmdb_adult_media:
             return True
@@ -330,6 +385,10 @@ class Prep:
         candidate = Path(meta.path or "")
         if candidate.suffix.lower() in music_extensions:
             return "MUSIC"
+
+        if not meta.is_disc and await asyncio.to_thread(prep_helpers.is_xxx_video_release, candidate):
+            logger.debug("[cyan]Matched XXX platform marker in release name[/cyan]")
+            return "XXX"
 
         path_patterns = [
             r"(?i)[\\/](?:tv|tvshows|tv.shows|series|shows)[\\/]",

@@ -137,6 +137,25 @@ def extract_series_from_filename(filename: str) -> tuple[str, str]:
     return match.group(1).strip(), normalize_series_index(match.group(2))
 
 
+def extract_audiobook_series_from_title(title: str) -> tuple[str, str, str]:
+    """Split unambiguous audiobook title/series formats."""
+    value = title.strip()
+    patterns = (
+        r"^(?P<title>.+?)\s*:\s*Hist[oó]ria\s+(?P<index>\d+(?:\.\d+)?)\s+de\s+(?P<series>.+)$",
+        r"^(?P<title>.+?)\s*:\s*(?P<series>.+?)[,]?\s*(?:livro|book)\s*(?P<index>\d+(?:\.\d+)?)\s*$",
+        r"^(?P<title>.+?)\s*:\s*(?P<series>(?:saga|série|serie|trilogia|duologia|antologia|coleção|colecao|universo)\b.+?)\s+(?P<index>\d+(?:\.\d+)?)\s*$",
+    )
+    for pattern in patterns:
+        match = re.match(pattern, value, re.IGNORECASE)
+        if match:
+            return (
+                match.group("title").strip(),
+                match.group("series").strip(),
+                normalize_series_index(match.group("index")),
+            )
+    return value, "", ""
+
+
 def extract_cbr_cbz_metadata(filepath: str) -> dict[str, Any]:
     """Extract metadata from a CBR (RAR) or CBZ (ZIP) container's ComicInfo.xml file."""
     metadata: dict[str, Any] = {}

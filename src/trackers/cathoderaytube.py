@@ -31,7 +31,7 @@ class CathodeRayTube:
     source_flag = "CRT"
     base_url = "https://www.cathode-ray.tube"
     upload_url = f"{base_url}/upload.php"
-    torrent_url = f"{base_url}/torrents.php"
+    torrent_url = f"{base_url}/torrents.php?id="
     tracker_urls = ("signal.cathode-ray.tube",)
     supported_categories = ("MOVIE", "TV", "GAME")
     allows_bloated_audio = True
@@ -388,7 +388,7 @@ class CathodeRayTube:
         category = str(meta.category).upper()
 
         # Explicit pornography is forbidden for all categories
-        if meta.adult_media or meta.tmdb_adult_media or meta.nsfw:
+        if meta.adult_media or meta.tmdb_adult_media:
             logger.warning(f"{self.tracker}: [red]Explicit pornography is forbidden.[/red]")
             return False
 

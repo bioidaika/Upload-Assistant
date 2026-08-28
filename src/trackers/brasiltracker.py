@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any, ClassVar, cast
 
 import aiofiles
-import cli_ui
 import fitz
 import httpx
 import langcodes
@@ -15,11 +14,9 @@ import rarfile
 from bs4 import BeautifulSoup
 from langcodes.tag_parser import LanguageTagError
 from rich.markup import escape
-from unidecode import unidecode
 
-from src.console import logger, prompt_in_thread
+from src.console import logger
 from src.cookie_auth import CookieAuthUploader, CookieValidator
-from src.genre_map import ENG_TO_PTBR_GENRE_MAP
 from src.get_desc import DescriptionBuilder, html_to_bbcode
 from src.languages import languages_manager
 from src.meta import Meta
@@ -223,7 +220,7 @@ class BrasilTracker:
             pc_platforms = {"PC", "MAC", "LINUX"}
             platform = meta.platform.upper().strip()
             if platform in pc_platforms:
-                builder = DescriptionBuilder(self.tracker, self.config)
+                builder = DescriptionBuilder(self.tracker, self.config, "pt-BR")
                 has_install_notes = await builder.get_user_description(meta)
                 if not has_install_notes:
                     logger.info(
@@ -587,7 +584,10 @@ class BrasilTracker:
 
     def get_titles(self, meta: Meta) -> tuple[str, str]:
         if meta.category == "BOOK":
-            return self.common.portuguese_title_capitalization(meta.title), ""
+            title = f"{meta.book_series.strip()}: " if meta.book_series else ""
+            title += meta.title.strip()
+            title += f" {meta.book_series_index.strip()}" if meta.book_series_index else ""
+            return self.common.portuguese_title_capitalization(title), ""
 
         if meta.category == "GAME":
             return meta.title, ""
@@ -608,29 +608,16 @@ class BrasilTracker:
         return "", ""
 
     async def get_description(self, meta: Meta) -> str:
-        builder = DescriptionBuilder(self.tracker, self.config)
+        builder = DescriptionBuilder(self.tracker, self.config, "pt-BR")
         # Set episode_tmdb_data on meta for general_description_generator to pick it up
         meta.episode_tmdb_data = self.episode_tmdb_data
 
         return await builder.general_description_generator(
             meta,
             audio_spectrogram=False,
-            bluray=False,
-            book=True,
-            custom_header=True,
-            custom_signature=False,
-            description=False,
-            game=True,
-            languages=False,
-            logo=True,
-            mediainfo=True,
             menu_screenshots=False,
             nfo=False,
             screenshots=False,
-            tonemapped_header=True,
-            tv_info=True,
-            ua_signature=True,
-            user_description=True,
             signature=f"[align=right][url=https://github.com/wastaken7/Upload-Assistant][size=1]Compartilhado com {meta.ua_name} {meta.current_version} (fork)[/size][/url][/align]",
         )
 
@@ -657,46 +644,6 @@ class BrasilTracker:
                 youtube = meta_trailer.replace("https://www.youtube.com/watch?v=", "").replace("/", "")
 
         return youtube
-
-    async def get_tags(self, meta: Meta) -> str:
-        """Map genres from meta.genres or TMDB to Portuguese tags."""
-        if meta.category == "BOOK":
-            return ""
-
-        matched_tags: list[str] = []
-
-        genres_list = meta.genres or meta.keywords or []
-        for genre in genres_list:
-            genre_lower = genre.strip().lower()
-            mapped = ENG_TO_PTBR_GENRE_MAP.get(genre_lower)
-
-            if not mapped and genre_lower in ENG_TO_PTBR_GENRE_MAP.values():
-                mapped = genre_lower
-
-            if mapped and mapped not in matched_tags:
-                matched_tags.append(mapped)
-
-        if meta.category in ("TV", "MOVIE") and not matched_tags:
-            genres_data: list[dict[str, Any]] = self.main_tmdb_data.get("genres", [])
-            for g in genres_data:
-                name = str(g.get("name", "")).lower()
-                if name.strip():
-                    mapped = ENG_TO_PTBR_GENRE_MAP.get(name)
-                    if mapped and mapped not in matched_tags:
-                        matched_tags.append(mapped)
-
-        # If we have matched tags, return them
-        if matched_tags:
-            return unidecode(", ".join(matched_tags))
-
-        # Final fallback: ask user
-        if meta.unattended and not meta.unattended_confirm:
-            logger.info(f"{self.tracker}: [yellow]Gêneros não encontrados em modo unattended. Plando upload para {self.tracker}.[/yellow]")
-            meta.skipping = f"{self.tracker}"
-            return ""
-
-        tags_raw = await prompt_in_thread(cli_ui.ask_string, f"Digite os gêneros (no formato do {self.tracker}): ")
-        return unidecode((tags_raw or "").strip())
 
     async def search_existing(self, meta: Meta) -> list[dict[str, Any]]:
         dupes: list[dict[str, Any]] = []
@@ -985,6 +932,7 @@ class BrasilTracker:
             "year": str(meta.year) if meta.year is not None else "",
             "title": original_title,
             "type": await self.get_type(meta),
+            "tags": await self.common.get_portuguese_tags(meta, tracker=self.tracker, tmdb_data=self.main_tmdb_data),
         }
 
         if meta.category == "GAME":
@@ -1010,7 +958,6 @@ class BrasilTracker:
                     "plataforma_jogo": self.get_game_platform_bt(meta),
                     "sys_jogo": self.get_game_os(meta),
                     "format": self.get_game_format(meta),
-                    "tags": await self.get_tags(meta),
                     "image": cover_url,
                     "sinopse": overview,
                     "especificas": description,
@@ -1067,7 +1014,6 @@ class BrasilTracker:
                         "diretor": meta.publisher or meta.author,
                         "edicao": edicao_str,
                         "paginas": self.get_book_pages(meta),
-                        "tags": await self.get_tags(meta),
                         "desc": html_to_bbcode(meta.overview),
                         "especificas": description,
                         "screen[]": await self.get_screens(meta),
@@ -1075,7 +1021,7 @@ class BrasilTracker:
                 )
 
                 if magazine:
-                    data["adulto"] = "1" if meta.xxx or meta.nsfw else "0"
+                    data["adulto"] = "1" if meta.adult_media or meta.tmdb_adult_media else "0"
 
                     months_pt = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
                     months_en = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
@@ -1092,7 +1038,6 @@ class BrasilTracker:
                 data.update(
                     {
                         "diretor": meta.author,
-                        "tags": await self.get_tags(meta),
                         "desc": html_to_bbcode(meta.overview),
                         "screen[]": await self.get_screens(meta),
                     }
@@ -1119,7 +1064,6 @@ class BrasilTracker:
                     "screen[]": await self.get_screens(meta),
                     "sinopse": self.main_tmdb_data.get("overview", "Nenhuma sinopse disponível."),
                     "subtitles[]": subtitle_ids,
-                    "tags": await self.get_tags(meta),
                     "video_c": await self.get_video_codec(meta),
                     "youtube": await self.get_trailer(meta),
                 }
@@ -1208,7 +1152,7 @@ class BrasilTracker:
 
     def build_book_desc(self, meta: Meta) -> str:
         """Build the BBCode table for BOOK-category uploads."""
-        builder = DescriptionBuilder(self.tracker, self.config)
+        builder = DescriptionBuilder(self.tracker, self.config, "pt-BR")
         return builder._build_book_desc_section(meta, header_size=3, table=False)
 
     async def get_book_cover(self, meta: Meta) -> str:

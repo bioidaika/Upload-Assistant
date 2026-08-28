@@ -59,6 +59,7 @@ class NameManager:
         if resolution == "OTHER":
             resolution = ""
         audio = meta.audio
+        hardcoded_subs = "HC" if meta.hardcoded_subs else ""
         service = str(meta.service)
         season = str(meta.season)
         episode = meta.episode
@@ -115,7 +116,12 @@ class NameManager:
         # YAY NAMING FUN
         name = ""
         potential_missing: list[str] = []
-        if meta.category == "MOVIE":  # MOVIE SPECIFIC
+        if meta.manual_name is not None:
+            name = str(meta.manual_name).strip()
+        elif meta.category == "XXX":
+            release_name = str(meta.scene_name or meta.basename_no_ext or meta.uuid or meta.title)
+            name = release_name.replace(".", " ")
+        elif meta.category == "MOVIE":  # MOVIE SPECIFIC
             if type == "DISC":  # Disk
                 if meta.is_disc == "BDMV":
                     name = f"{title} {alt_title} {year} {three_d} {edition} {hybrid} {repack} {resolution} {region} {uhd} {source} {hdr} {video_codec} {audio}"
@@ -136,10 +142,10 @@ class NameManager:
                 name = f"{title} {alt_title} {year} {edition} {hybrid} {repack} {resolution} {uhd} {source} {audio} {hdr} {video_encode}"
                 potential_missing = ["edition", "description"]
             elif type == "WEBDL":  # WEB-DL
-                name = f"{title} {alt_title} {year} {edition} {hybrid} {repack} {resolution} {uhd} {service} WEB-DL {audio} {hdr} {video_encode}"
+                name = f"{title} {alt_title} {year} {edition} {hybrid} {repack} {resolution} {uhd} {service} WEB-DL {hardcoded_subs} {audio} {hdr} {video_encode}"
                 potential_missing = ["edition", "service"]
             elif type == "WEBRIP":  # WEBRip
-                name = f"{title} {alt_title} {year} {edition} {hybrid} {repack} {resolution} {uhd} {service} WEBRip {audio} {hdr} {video_encode}"
+                name = f"{title} {alt_title} {year} {edition} {hybrid} {repack} {resolution} {uhd} {service} WEBRip {hardcoded_subs} {audio} {hdr} {video_encode}"
                 potential_missing = ["edition", "service"]
             elif type == "HDTV":  # HDTV
                 name = f"{title} {alt_title} {year} {edition} {repack} {resolution} {source} {audio} {video_encode}"
@@ -170,10 +176,10 @@ class NameManager:
                 name = f"{title} {year} {alt_title} {season}{episode} {episode_title} {part} {edition} {hybrid} {repack} {resolution} {uhd} {source} {audio} {hdr} {video_encode}"  # SOURCE
                 potential_missing = ["edition", "description"]
             elif type == "WEBDL":  # WEB-DL
-                name = f"{title} {year} {alt_title} {season}{episode} {episode_title} {part} {edition} {hybrid} {repack} {resolution} {uhd} {service} WEB-DL {audio} {hdr} {video_encode}"
+                name = f"{title} {year} {alt_title} {season}{episode} {episode_title} {part} {edition} {hybrid} {repack} {resolution} {uhd} {service} WEB-DL {hardcoded_subs} {audio} {hdr} {video_encode}"
                 potential_missing = ["edition", "service"]
             elif type == "WEBRIP":  # WEBRip
-                name = f"{title} {year} {alt_title} {season}{episode} {episode_title} {part} {edition} {hybrid} {repack} {resolution} {uhd} {service} WEBRip {audio} {hdr} {video_encode}"
+                name = f"{title} {year} {alt_title} {season}{episode} {episode_title} {part} {edition} {hybrid} {repack} {resolution} {uhd} {service} WEBRip {hardcoded_subs} {audio} {hdr} {video_encode}"
                 potential_missing = ["edition", "service"]
             elif type == "HDTV":  # HDTV
                 name = f"{title} {year} {alt_title} {season}{episode} {episode_title} {part} {edition} {repack} {resolution} {source} {audio} {video_encode}"
@@ -203,7 +209,8 @@ class NameManager:
             exit()
         name_notag = name
 
-        name = name_notag + tag
+        tag_already_present = meta.category == "XXX" and bool(tag) and name_notag.casefold().endswith(tag.casefold())
+        name = name_notag if meta.manual_name is not None or tag_already_present else name_notag + tag
 
         clean_name = await self.clean_filename(name)
         return name_notag, name, clean_name, potential_missing
@@ -218,6 +225,8 @@ class NameManager:
         author = meta.author.strip()
         publisher = meta.publisher.strip()
         title = meta.title.strip()
+        book_series = f"{meta.book_series.strip()}:" if meta.book_series else ""
+        book_series_index = meta.book_series_index
         year = str(meta.year).strip() if meta.year is not None else ""
 
         # Edition/Issue logic
@@ -269,10 +278,10 @@ class NameManager:
             ebook_type = ebook_type.upper()
 
         # Construct final string parts based on subtype
-        parts = []
+        parts: list[str] = []
 
         if audiobook:
-            parts.extend([author, "-", title, edition, year, lang_display, "AUDIOBOOK"])
+            parts.extend([author, "-", book_series, title, book_series_index, edition, year, lang_display, "AUDIOBOOK"])
         elif comic:
             vol_str = f"Vol {volume}" if volume else ""
             no_str = f"No {issue}" if issue else ""
@@ -287,7 +296,7 @@ class NameManager:
             parts.extend([title, year, lang_display, source, ebook_type, "eBOOK"])
         else:
             author_or_publisher = author or publisher
-            parts.extend([author_or_publisher, "-", title, edition, year, lang_display, source, ebook_type, "eBOOK"])
+            parts.extend([author_or_publisher, "-", book_series, title, book_series_index, edition, year, lang_display, source, ebook_type, "eBOOK"])
 
         cleaned_parts = [p for p in parts if p]
         base_name = " ".join(cleaned_parts)

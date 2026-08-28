@@ -17,6 +17,7 @@ from src.console import console, logger
 from src.description_review import get_base_description
 from src.exceptions import *  # noqa F403
 from src.meta import Meta
+from src.temp_paths import screenshots_dir
 from src.torrentcreate import TorrentCreator
 from src.trackers.common import Common
 
@@ -206,7 +207,7 @@ class HDBits:
         hdb_name = meta.name
         audio = meta.audio
         hdb_name = hdb_name.replace("H.265", "HEVC")
-        if meta.source or ("".upper() == "WEB" and meta.service) or "".strip() != "":
+        if meta.service:
             hdb_name = hdb_name.replace(f"{meta.service} ", "", 1)
         if "DV" in meta.hdr:
             hdb_name = hdb_name.replace(" DV ", " DoVi ")
@@ -667,7 +668,7 @@ class HDBits:
                 logger.debug(f"{self.tracker}: [cyan]{i}: {Path(path).name}")
         else:
             thumb_size = "w300"
-            screenshot_dir = f"{meta.base_dir}{'/' + 'tmp' + '/'}{meta.uuid}"
+            screenshot_dir = screenshots_dir(meta.base_dir, meta.uuid)
             # similar to uploadscreens.py L546
             image_patterns = ["*.png", ".[!.]*.png"]
             image_glob: list[str] = []
