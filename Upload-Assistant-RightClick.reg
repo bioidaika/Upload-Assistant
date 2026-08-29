@@ -1,0 +1,13 @@
+Windows Registry Editor Version 5.00
+
+[HKEY_CURRENT_USER\Software\Classes\*\shell\Upload-Assistant]
+@="Upload-Assistant"
+
+[HKEY_CURRENT_USER\Software\Classes\*\shell\Upload-Assistant\command]
+@="\"D:\\Upload-Assistant\\Upload-Assistant-RightClick.bat\" \"%1\""
+
+[HKEY_CURRENT_USER\Software\Classes\Directory\shell\Upload-Assistant]
+@="Upload-Assistant"
+
+[HKEY_CURRENT_USER\Software\Classes\Directory\shell\Upload-Assistant\command]
+@="\"D:\\Upload-Assistant\\Upload-Assistant-RightClick.bat\" \"%1\""
