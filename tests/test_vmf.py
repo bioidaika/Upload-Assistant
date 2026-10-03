@@ -13,7 +13,7 @@ from src.trackers.UNIT3D.vietmediaf import VietMediaF
 
 
 def tracker(*, modq: bool = False) -> VietMediaF:
-    return VietMediaF({"DEFAULT": {}, "TRACKERS": {"VMF": {"api_key": "test-key", "modq": modq}}})
+    return VietMediaF({"DEFAULT": {}, "TRACKERS": {"VIETMEDIAF": {"api_key": "test-key", "modq": modq}}})
 
 
 def vmf_name(name: str, **meta_values: object) -> str:
@@ -42,7 +42,7 @@ def valid_meta(**overrides: object) -> Meta:
 def test_vmf_profile_uses_canonical_identity_and_unit3d_endpoints():
     vmf = tracker()
 
-    assert vmf.tracker == "VMF"
+    assert vmf.tracker == "VIETMEDIAF"
     assert vmf.display_name == "VietMediaF"
     assert vmf.auth_type == "unit3d_api"
     assert vmf.supported_categories == ("MOVIE", "TV")
@@ -57,13 +57,13 @@ def test_vmf_profile_uses_canonical_identity_and_unit3d_endpoints():
 def test_vmf_is_registered_as_unit3d_api_tracker_with_comment_host():
     from src.trackersetup import api_trackers, get_tracker_comment_hosts, tracker_class_map
 
-    assert tracker_class_map["VMF"] is VietMediaF
-    assert "VMF" in api_trackers
-    assert get_tracker_comment_hosts({"TRACKERS": {"VMF": {}}})["VMF"] == ("tracker.vietmediaf.store",)
+    assert tracker_class_map["VIETMEDIAF"] is VietMediaF
+    assert "VIETMEDIAF" in api_trackers
+    assert get_tracker_comment_hosts({"TRACKERS": {"VIETMEDIAF": {}}})["VIETMEDIAF"] == ("tracker.vietmediaf.store",)
 
 
 def test_vmf_example_config_has_only_required_tracker_credentials():
-    vmf_config = example_config["TRACKERS"]["VMF"]
+    vmf_config = example_config["TRACKERS"]["VIETMEDIAF"]
 
     assert vmf_config["api_key"] == ""
     assert vmf_config["anon"] is False
@@ -75,9 +75,9 @@ def test_vmf_example_config_has_only_required_tracker_credentials():
 @pytest.mark.parametrize("language", ["vi", "vie", "vi-VN", "Vietnamese", "Tiếng Việt", "tieng viet"])
 def test_vmf_allows_vietnamese_audio_without_bloat_warning(monkeypatch: pytest.MonkeyPatch, language: str):
     trackersetup_stub = ModuleType("src.trackersetup")
-    trackersetup_stub.tracker_class_map = {"VMF": VietMediaF}
+    trackersetup_stub.tracker_class_map = {"VIETMEDIAF": VietMediaF}
     monkeypatch.setitem(sys.modules, "src.trackersetup", trackersetup_stub)
-    meta = Meta(trackers=["VMF"])
+    meta = Meta(trackers=["VIETMEDIAF"])
 
     bloated_check(meta, [language])
 
@@ -86,9 +86,9 @@ def test_vmf_allows_vietnamese_audio_without_bloat_warning(monkeypatch: pytest.M
 
 def test_vmf_still_warns_for_unrelated_bloated_audio(monkeypatch: pytest.MonkeyPatch):
     trackersetup_stub = ModuleType("src.trackersetup")
-    trackersetup_stub.tracker_class_map = {"VMF": VietMediaF}
+    trackersetup_stub.tracker_class_map = {"VIETMEDIAF": VietMediaF}
     monkeypatch.setitem(sys.modules, "src.trackersetup", trackersetup_stub)
-    meta = Meta(trackers=["VMF"])
+    meta = Meta(trackers=["VIETMEDIAF"])
 
     bloated_check(meta, ["fr"])
 
@@ -290,7 +290,7 @@ def test_vmf_uses_tmdb_id_fallback():
 
 
 def test_vmf_dupe_search_uses_same_tmdb_fallback_as_upload_payload():
-    meta = valid_meta(tmdb="invalid", tmdb_id=123, tracker_status={"VMF": {}})
+    meta = valid_meta(tmdb="invalid", tmdb_id=123, tracker_status={"VIETMEDIAF": {}})
     vmf = tracker()
     vmf.get_search_urls = AsyncMock(return_value=[])
 
@@ -302,7 +302,7 @@ def test_vmf_dupe_search_uses_same_tmdb_fallback_as_upload_payload():
 def test_vmf_request_search_uses_endpoint_and_other_resolution_mapping(tmp_path):
     from src.trackersetup import TrackerSetup
 
-    config = {"DEFAULT": {}, "TRACKERS": {"VMF": {"api_key": "test-key", "modq": False}}}
+    config = {"DEFAULT": {}, "TRACKERS": {"VIETMEDIAF": {"api_key": "test-key", "modq": False}}}
     setup = TrackerSetup(config)
     setup.get_tracker_requests = AsyncMock(
         return_value=[
@@ -323,9 +323,9 @@ def test_vmf_request_search_uses_endpoint_and_other_resolution_mapping(tmp_path)
     )
     meta = valid_meta(resolution="OTHER", base_dir=str(tmp_path), uuid="vmf-request-test", path="Example.mkv")
 
-    assert asyncio.run(setup.tracker_request(meta, "VMF")) is True
+    assert asyncio.run(setup.tracker_request(meta, "VIETMEDIAF")) is True
     assert setup.get_tracker_requests.await_args.args[2] == "https://tracker.vietmediaf.store/api/requests/filter"
-    request_log = json.loads((tmp_path / "tmp" / "VMF_request_results.json").read_text(encoding="utf-8"))
+    request_log = json.loads((tmp_path / "tmp" / "VIETMEDIAF_request_results.json").read_text(encoding="utf-8"))
     assert request_log[0]["url"] == "https://tracker.vietmediaf.store/requests/42"
 
 

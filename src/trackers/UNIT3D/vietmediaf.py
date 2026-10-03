@@ -10,7 +10,7 @@ from src.trackers.UNIT3D import UNIT3D
 class VietMediaF(UNIT3D):
     """VietMediaF's UNIT3D API adapter."""
 
-    tracker = "VMF"
+    tracker = "VIETMEDIAF"
     display_name = "VietMediaF"
     base_url = "https://tracker.vietmediaf.store"
     banned_groups: tuple[str, ...] = ()
@@ -46,7 +46,7 @@ class VietMediaF(UNIT3D):
     _vietnamese_language_tokens = frozenset({"vi", "vie", "vietnamese"})
 
     def __init__(self, config: dict[str, Any]) -> None:
-        super().__init__(config, tracker_name="VMF")
+        super().__init__(config, tracker_name="VIETMEDIAF")
 
     @staticmethod
     def _normalized_words(value: str) -> str:
