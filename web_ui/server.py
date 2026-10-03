@@ -5278,7 +5278,7 @@ def get_trackers():
         api_key = str(tracker_config.get("api_key") or "").strip() if isinstance(tracker_config, dict) else ""
         favicon_url = ""
         static_dir = Path(__file__).parent / "static"
-        # Try acronym first (e.g. vmf.png), then display name (e.g. vietmediaf.png)
+        # Try acronym first (e.g. vietmediaf.png), then display name (e.g. VietMediaF -> vietmediaf.png)
         candidate_names = [tracker_name.lower()]
         if display_name.lower() != tracker_name.lower():
             candidate_names.append(display_name.lower())
