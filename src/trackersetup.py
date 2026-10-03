@@ -1493,7 +1493,7 @@ tracker_class_map: Any = LazyTrackerDict(
         "TVCHAOSUK": ("src.trackers.tvchaosuk", "TVChaosUK"),
         "ULCX": ("src.trackers.UNIT3D.ulcx", "ULCX"),
         "UTOPIA": ("src.trackers.UNIT3D.utopia", "Utopia"),
-        "VMF": ("src.trackers.UNIT3D.vmf", "VietMediaF"),
+        "VMF": ("src.trackers.UNIT3D.vietmediaf", "VietMediaF"),
         "XINGYUNGEPT": ("src.trackers.NEXUSPHP.xingyungept", "XingyungePT"),
         "YUSCENE": ("src.trackers.UNIT3D.yuscene", "YUSCENE"),
         "ZENITH": ("src.trackers.UNIT3D.znth", "Zenith"),

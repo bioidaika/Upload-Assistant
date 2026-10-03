@@ -9,7 +9,7 @@ import pytest
 from data.example_config import config as example_config
 from src.audio import bloated_check
 from src.meta import Meta
-from src.trackers.UNIT3D.vmf import VietMediaF
+from src.trackers.UNIT3D.vietmediaf import VietMediaF
 
 
 def tracker(*, modq: bool = False) -> VietMediaF:
