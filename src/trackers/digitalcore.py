@@ -50,8 +50,14 @@ class DigitalCore:
     def __init__(self, config: Config):
         self.config = config
         self.common = Common(config)
-        self.rehost_images_manager = RehostImagesManager(config)
-        self.api_key = self.config["TRACKERS"][self.tracker].get("api_key")
+        tracker_config = self.config["TRACKERS"][self.tracker]
+        force_rehost = str(tracker_config.get("force_rehost_images", False)).strip().lower() in {"1", "true", "yes"}
+        image_config = config
+        if force_rehost:
+            image_config = {**config, "DEFAULT": {**config.get("DEFAULT", {}), "img_host_1": "sharex"}}
+            self.image_host_policy = ImageHostPolicy(self.image_host_policy.url_host_mapping, ("sharex",))
+        self.rehost_images_manager = RehostImagesManager(image_config)
+        self.api_key = tracker_config.get("api_key")
         self.session = httpx.AsyncClient(headers={"X-API-KEY": self.api_key}, timeout=30.0)
 
     async def mediainfo(self, meta: Meta) -> str:
@@ -132,7 +138,7 @@ class DigitalCore:
         return None
 
     async def search_existing(self, meta: Meta) -> list[dict[str, Any]]:
-        imdb_id = meta.imdb_info.get("imdbID")
+        imdb_id = meta.imdb_tt
         category_id = self.get_category_id(meta)
 
         search_params = {"search": meta.title}
@@ -195,17 +201,19 @@ class DigitalCore:
             #         abcdefghijklmnopqrstuvwxyz
             #         0123456789 . -
             # https://scenerules.org/html/2014_BLURAY.html
-            tracker_name = tracker_name.replace("DD+", "DDP").replace("DTS:", "DTS-").replace("HDR10+", "HDR10P")
-            tracker_name = unicodedata.normalize("NFD", tracker_name)
-            tracker_name = "".join(c for c in tracker_name if c.isascii() and (c.isalnum() or c in (" ", ".", "-")))
-            tracker_name = tracker_name.replace("!", "")
+            tracker_name = self.clean_name(tracker_name)
             if scene_name:
                 tracker_name += " [UNRAR]"
-
         else:
-            tracker_name = f"{scene_name} [UNRAR]" if scene_name else meta.basename_no_ext
+            tracker_name = f"{scene_name} [UNRAR]" if scene_name else self.clean_name(meta.basename_no_ext)
 
         return tracker_name
+
+    def clean_name(self, tracker_name: str) -> str:
+        tracker_name = tracker_name.replace("DD+", "DDP").replace("DTS:", "DTS-").replace("HDR10+", "HDR10P")
+        tracker_name = unicodedata.normalize("NFD", tracker_name)
+        tracker_name = "".join(c for c in tracker_name if c.isascii() and (c.isalnum() or c in (" ", ".", "-")))
+        return tracker_name.replace("!", "")
 
     async def get_firstpic(self, meta: Meta) -> str:
         if meta.category in ("BOOK", "MUSIC"):
@@ -220,18 +228,19 @@ class DigitalCore:
         anon = "1" if meta.anon or self.config["TRACKERS"][self.tracker].get("anon", False) else "0"
 
         return {
+            "anonymousUpload": anon,
             "category": self.get_category_id(meta),
+            "firstpic": await self.get_firstpic(meta),
+            "frileech": "1",
+            "gameUrl": meta.steam_url or meta.igdb_url,
             "imdbId": meta.imdb_tt,
-            "nfo": await self.generate_description(meta),
+            "language": meta.book_language,
             "mediainfo": await self.mediainfo(meta),
+            "nfo": await self.generate_description(meta),
+            "p2p": "0",
             "reqid": "0",
             "section": "new",
-            "frileech": "1",
-            "anonymousUpload": anon,
-            "p2p": "0",
             "unrar": "1",
-            "firstpic": await self.get_firstpic(meta),
-            "language": meta.book_language,
         }
 
     async def upload(self, meta: Meta) -> bool:

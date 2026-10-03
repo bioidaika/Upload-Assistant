@@ -10,7 +10,8 @@ config: dict[str, Any] = {
         "verbose_notification": False,
         # Number of hours to reuse a successful update check. Set to 0 to check every run.
         "update_notification_cache_hours": 4,
-        # Set to True to play a bell sound when prompting for confirmation.
+        # Set to True to play a bell sound before release confirmation (CLI and WebUI).
+        # WebUI sound plays in the browser; allow site audio and keep the tab unmuted.
         "sfx_on_prompt": True,
         # Set to True to apply argument overrides from data/templates/user-args.json.
         "user_overrides": False,
@@ -18,8 +19,6 @@ config: dict[str, Any] = {
         "personal_release_groups": [],
         # Set to True to suppress configuration warnings at startup.
         "suppress_warnings": False,
-        # Set to True to keep meta.json between runs instead of deleting it before processing begins.
-        "keep_meta": False,
         # --- LOGGING ---
         # Console logging configuration
         # Show the time in console logs.
@@ -68,6 +67,9 @@ config: dict[str, Any] = {
         # MyAnonamouse (MAM) API key or session cookie (mam_id). Leave blank to disable.
         # Find it under Preferences > Security > View IP locked session cookie.
         "mam_api_key": "",
+        # GazelleGames API key. Leave blank to disable game metadata enrichment.
+        # Create one in your GazelleGames profile settings with no write permissions required.
+        "ggn_api_key": "",
         # BTN API key used to retrieve metadata from BTN.
         "btn_api": "",
         # --- ARR INTEGRATION ---
@@ -75,26 +77,26 @@ config: dict[str, Any] = {
         "use_sonarr": False,
         "sonarr_url": "http://localhost:8989",
         "sonarr_api_key": "",
-        # Settings for a second Sonarr instance.
-        # Add additional Sonarr instances by adding more sonarr_url_x and sonarr_api_key_x entries.
-        "sonarr_url_1": "http://my-second-instance:8989",
-        "sonarr_api_key_1": "",
         # Set to True to use Radarr when searching for movies.
         "use_radarr": False,
         "radarr_url": "http://localhost:7878",
         "radarr_api_key": "",
-        # Settings for a second Radarr instance.
-        # Add additional Radarr instances by adding more radarr_url_x and radarr_api_key_x entries.
-        "radarr_url_1": "http://my-second-instance:7878",
-        "radarr_api_key_1": "",
+        # Optional second Sonarr instance. Uncomment these entries and repeat
+        # with suffixes _2 and _3 to configure up to four instances in total.
+        # "sonarr_url_1": "http://my-second-instance:8989",
+        # "sonarr_api_key_1": "",
+        # Optional second Radarr instance. Uncomment these entries and repeat
+        # with suffixes _2 and _3 to configure up to four instances in total.
+        # "radarr_url_1": "http://my-second-instance:7878",
+        # "radarr_api_key_1": "",
         # --- EXTERNAL TOOL PATHS ---
         # Optional paths to external media tools. Leave blank to use the bundled
         # tool when available, or the corresponding executable on the system PATH.
-        # The DVD-specific MediaInfo executable must remain on version 23.04 because
-        # newer releases do not preserve its DVD parsing behavior.
         "ffmpeg_path": "",
         "ffprobe_path": "",
         "mediainfo_path": "",
+        # The DVD-specific MediaInfo executable must remain on version 23.04 because
+        # newer releases do not preserve its DVD parsing behavior.
         "dvd_mediainfo_path": "",
         "bdinfo_path": "",
         "mkbrr_path": "",
@@ -113,6 +115,11 @@ config: dict[str, Any] = {
         # "injecting_client_list": ["qbittorrent", "rtorrent"],
         # Clients searched for existing torrents:
         # "searching_client_list": ["qbittorrent", "qbittorrent_searching"],
+        # --- LOCAL STATISTICS ---
+        # Store privacy-preserving daily aggregates for the Stats Web UI. No media
+        # names, paths, external IDs, URLs, or credentials are stored. Opt in by
+        # changing this setting to True.
+        "stats_enabled": False,
         # --- METADATA CACHING ---
         # Public metadata cache
         # Cache responses from sites such as TMDB and IMDb for reuse in future runs, reducing API requests.
@@ -150,10 +157,14 @@ config: dict[str, Any] = {
             # Book, audiobook, and comic metadata. This data changes rarely,
             # so the default here is 30 days (720 hours).
             "google_books": {"enabled": True, "ttl_hours": 720},
+            # Audible catalog metadata and user rating counts change more often.
+            "audible": {"enabled": True, "ttl_hours": 24},
             # Work IDs, ISBNs, and author names from OpenLibrary.
             "openlibrary": {"enabled": True, "ttl_hours": 720},
             # Data fetched from a MAM account; a shorter duration reflects changes.
             "myanonamouse": {"enabled": True, "ttl_hours": 24},
+            # Private-tracker game metadata can be edited, so keep this relatively fresh.
+            "gazellegames": {"enabled": True, "ttl_hours": 24},
             # Music release metadata; it also uses 30 days because it changes rarely.
             "musicbrainz": {"enabled": True, "ttl_hours": 720},
             "discogs": {"enabled": True, "ttl_hours": 720},
@@ -207,9 +218,15 @@ config: dict[str, Any] = {
         # Set to True to also search PreDB for a matching scene release.
         # PreDB can be inconsistent or time out, but it may find releases absent from SRRDB.
         "check_predb": False,
+        # --- PROWLARR CREDENTIAL FALLBACK ---
+        # Optional Prowlarr base URL and API key. When both are set, Upload
+        # Assistant fills missing supported tracker API keys and cookies in
+        # memory at the start of each run. Local credentials always take precedence.
+        "prowlarr_url": "",
+        "prowlarr_api_key": "",
         # --- IMAGE HOSTING ---
         # Order of image hosts, with the primary host first and backups after it.
-        # Available image hosts: dalexni, imgbb, imgbox, lensdump, lostimg, midnightscene, onlyimage, passtheimage, pixhost, ptscreens, seedpool_cdn, sharex, utppm, zipline
+        # Available image hosts: catbox, dalexni, imgbb, imgbox, lensdump, lostimg, midnightscene, onlyimage, passtheimage, pixhost, ptscreens, seedpool_cdn, sharex, utppm, zipline
         "img_host_1": "",
         "img_host_2": "",
         "img_host_3": "",
@@ -227,6 +244,8 @@ config: dict[str, Any] = {
         # Minimum number of successful image uploads required to continue.
         "min_successful_image_uploads": "3",
         # Image-host credentials
+        # Optional Catbox userhash. Leave blank for anonymous uploads.
+        "catbox_userhash": "",
         "dalexni_api": "",
         "imgbb_api": "",
         "lensdump_api": "",
@@ -257,6 +276,9 @@ config: dict[str, Any] = {
         # Set to True only to convert non-square-pixel video to its display geometry.
         # This can change dimensions such as 1920x1040 to 1924x1040.
         "scale_screenshots_for_par": False,
+        # Apply PAR scaling to DVD screenshots and DVD menu captures by default.
+        # Set to False to keep their coded dimensions instead.
+        "scale_dvd_screenshots_for_par": True,
         # Maximum number of FFmpeg processes that can run at once.
         # The effective limit is the lower of this value and the number of screenshots.
         "process_limit": "4",
@@ -287,11 +309,25 @@ config: dict[str, Any] = {
         # Works only when the input frame has a supported color tag.
         "desat": "10.0",
         # Screenshot overlays
-        # Set to True to overlay the frame number, frame type, and "Tonemapped" label when applicable.
+        # Layout examples and manual setup: docs/screenshot-overlays.md
+        # Show enabled screenshot labels without changing the individual selections below.
+        # Enable at least one label below to display overlay text.
         # Enabling overlays uses FFmpeg tone mapping instead of libplacebo.
         "frame_overlay": False,
-        # Overlay text size, scaled with resolution.
+        # Overlay text size (1-100), scaled with resolution. VapourSynth rounds to whole font-scale steps.
         "overlay_text_size": "18",
+        # Keep labels at the top, aligned to "left" or "right".
+        "overlay_position": "left",
+        # Use "stacked" for one label per line, or "single_line" for compact labels separated by bullets.
+        "overlay_layout": "stacked",
+        # Show the estimated frame number at the capture position.
+        "overlay_frame_number": False,
+        # Show the frame's picture type (I, P, or B).
+        "overlay_frame_type": False,
+        # Show the captured frame's elapsed video time (HH:MM:SS.mmm).
+        "overlay_timestamp": False,
+        # Show only when screenshots have been tonemapped to SDR.
+        "overlay_tonemapped": False,
         # --- DISC MENU SCREENSHOTS ---
         # Set to True to capture DVD menu screenshots from menu VOBs.
         "auto_dvd_menus": True,
@@ -320,6 +356,12 @@ config: dict[str, Any] = {
         # Preferred logo language (ISO 639-1). Defaults to English ("en").
         # Falls back to English when a logo in the preferred language is unavailable.
         "logo_language": "",
+        # Audible marketplace used to link ASINs in descriptions. Leave empty
+        # unless you set your marketplace explicitly.
+        # Examples: audible.com, audible.co.uk, audible.com.br.
+        # --audible-url overrides this value for an individual upload. Audiobook
+        # catalog lookup requires this domain (or --audible-url) and an ASIN.
+        "audible_domain": "",
         # Screenshot thumbnail width where supported. Default: 350 (for example, [img=350]).
         "thumbnail_size": "350",
         # Number of screenshots per row on sites that use the common description.
@@ -356,6 +398,8 @@ config: dict[str, Any] = {
         # Header added above the screenshot section where supported.
         # Can be overridden per tracker by adding the same setting to its configuration.
         "screenshot_header": "[h2]Screenshots[/h2]",
+        # Set to False to keep the screenshot header even when screenshots are the only section.
+        "hide_screenshot_header_if_only_section": True,
         # Header added above screenshots after HDR tone mapping.
         # Can be overridden per tracker by adding the same setting to its configuration.
         "tonemapped_header": "[center]Screenshots have been adapted for SDR viewing, for reference only.[/center]",
@@ -374,15 +418,16 @@ config: dict[str, Any] = {
         # case-insensitively, with or without their leading hyphen.
         # Per-tracker tag_overrides take precedence over these DEFAULT overrides.
         "tag_overrides": {
-            "MyAwesomeGroupTag": {
-                "custom_description_header": "[center]MyAwesomeGroupTag release[/center]",
-                "screenshot_header": "[h2]MyAwesomeGroupTag Screenshots[/h2]",
-                "disc_menu_header": "[h2]MyAwesomeGroupTag Disc Menu Screenshots[/h2]",
-                "audio_spectrogram_header": "[h2]MyAwesomeGroupTag Audio Spectrogram[/h2]",
-                "dynamic_hdr_plot_header": "[h2]MyAwesomeGroupTag Dynamic HDR Metadata[/h2]",
-                "tonemapped_header": "[center]MyAwesomeGroupTag SDR reference screenshots[/center]",
-                "custom_signature": "[center]MyAwesomeGroupTag signature[/center]",
-            },
+            # Uncomment and rename this example group to configure your own overrides.
+            # "MyAwesomeGroupTag": {
+            #     "custom_description_header": "[center]MyAwesomeGroupTag release[/center]",
+            #     "screenshot_header": "[h2]MyAwesomeGroupTag Screenshots[/h2]",
+            #     "disc_menu_header": "[h2]MyAwesomeGroupTag Disc Menu Screenshots[/h2]",
+            #     "audio_spectrogram_header": "[h2]MyAwesomeGroupTag Audio Spectrogram[/h2]",
+            #     "dynamic_hdr_plot_header": "[h2]MyAwesomeGroupTag Dynamic HDR Metadata[/h2]",
+            #     "tonemapped_header": "[center]MyAwesomeGroupTag SDR reference screenshots[/center]",
+            #     "custom_signature": "[center]MyAwesomeGroupTag signature[/center]",
+            # },
         },
         # --- BLU-RAY SETTINGS ---
         # Set to True to use the largest Blu-ray playlist without a selection prompt.
@@ -413,7 +458,7 @@ config: dict[str, Any] = {
         # --- AUDIO SPECTROGRAMS AND HDR PLOTS ---
         # Audio spectrograms
         # Set to True to add audio spectrograms to the description.
-        "add_audio_spectrogram": True,
+        "add_audio_spectrogram": False,
         # Set to True to generate spectrograms for all audio streams.
         "process_all_audio_spectrogram": False,
         # Seconds from the beginning of each selected stream to analyse.
@@ -500,11 +545,11 @@ config: dict[str, Any] = {
         # Note: Description layout settings (like screenshot grids, logos, etc.) can be overridden per-tracker.
         # See: https://github.com/wastaken7/Upload-Assistant/blob/development/docs/description-builder.md
         # Available trackers:
-        #   1PTBA, AITHER, ALPHARATIO, AMIGOSSHARE, ANTHELION, ASIANCINEMA, AVISTAZ, BEYONDHD, BITHDTV, BITPORN, BJSHARE, BLUTOPIA,
+        #   1PTBA, AITHER, ALPHARATIO, ANTHELION, ASIANCINEMA, AVISTAZ, BEYONDHD, BITHDTV, BITPORN, BJSHARE, BLUTOPIA,
         #   BRASILTRACKER, BROADCASTHENET, CAPYBARABR, CATHODERAYTUBE, CINEMATIK, CINEMAZ, CURUPIRA, DARKPEERS, DESITORRENTS, DIGITALCORE,
         #   DREADVAULT, DRUNKENSLUG, EMUWAREZ, FILELIST, FLOOD, FUNFILE, GREATPOSTERWALL, HAWKEUNO, HDBITS, HDSPACE, HDTORRENTS, HOMIEHELPDESK,
         #   IMMORTALSEED, INFINITYHD, IPTORRENTS, ITATORRENTS, LAJIDUI, LASTDIGITALUNDERGROUND, LATTEAM, LEMONHD, LOCADORA, LONGPT, LST,
-        #   LUMINARR, MAKINGOFF, MIDNIGHTSCENE, MTEAM, NEBULANCE, NORDICQUALITY, NZBGEEK, OLDTOONSWORLD, ONLYENCODES, ORPHEUS, PASSTHEPOPCORN,
+        #   LUMINARR, MAKINGOFF, MIDNIGHTSCENE, MTEAM, NEBULANCE, NORDICQUALITY, NZBGEEK, NZBNEST, OLDTOONSWORLD, ONLYENCODES, ORPHEUS, PASSTHEPOPCORN,
         #   PEERGARDEN, POLISHTORRENT, PORTUGAS, PRIVATEHD, PTCAFE, PTERCLUB, PTFANS, PTGTK, PTSKIT, PTZONE, RACING4EVERYONE, RAILGUNPT,
         #   RASTASTUGAN, REELFLIX, RETROFLIX, RETROMOVIESCLUB, ROCKETHD, SAMARITANO, SEEDPOOL, SHAREISLAND, SKIPTHECOMMERCIALS, SPEEDAPP,
         #   SUIO, SWARMAZON, THELEACHZONE, THEOLDSCHOOL, TORRENTEROS, TORRENTHR, TORRENTLEECH, TOTHEGLORY, TVCHAOSUK, ULCX, UTOPIA,
@@ -513,6 +558,8 @@ config: dict[str, Any] = {
         # Only add the trackers you want to upload to on a regular basis
         "default_trackers": "",
         "1PTBA": {
+            # Alias used to select this tracker with -tk/--trackers; case-insensitive.
+            "cli_alias": "1PT",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # Cookies required (export from https://1ptba.com/ to data/cookies/1PTBA.txt).
@@ -545,13 +592,14 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "AITHER": {
+            "cli_alias": "ATH",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # "use_for_search": False, set to True if using this tracker for automatic ID searching or description parsing
             "use_for_search": False,
             "api_key": "",
             "anon": True,
-            # Send uploads to AITHER modq for staff approval
+            # Send uploads to the moderation queue for staff review and approval
             "modq": False,
             # For authorized users only. Do not change this unless you know what you are doing
             # Upload as featured
@@ -596,6 +644,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "ALPHARATIO": {
+            "cli_alias": "AR",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # anon is not an option when uploading you need to change your privacy settings.
@@ -604,45 +653,8 @@ config: dict[str, Any] = {
             "announce_url": "",
             "inject_delay": 0,
         },
-        "AMIGOSSHARE": {
-            # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
-            "link_dir_name": "",
-            # Set uploader_status to True if you have uploader permissions to automatically approve your uploads
-            "uploader_status": False,
-            # The custom layout default is 2
-            # If you have a custom layout, you'll need to inspect the element on the upload page to find the correct layout value
-            # Don't change it unless you know what you're doing
-            "custom_layout": "2",
-            # anon is not an option when uploading to AMIGOSSHARE
-            # Cookies required (export from https://cliente.amigos-share.club/ to data/cookies/AMIGOSSHARE.txt).
-            # See: https://github.com/wastaken7/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
-            "announce_url": "",
-            # Set this to True if you want to allow external subtitles to be included in the upload
-            "allow_ext_subtitles": True,
-            # The configurations below override the DEFAULT configuration
-            "add_logo": True,
-            "logo_size": "",
-            "thumbnail_size": "",
-            "screens_per_row": "",
-            "episode_overview": True,
-            "multiScreens": "",
-            "pack_thumb_size": "",
-            "charLimit": "",
-            "fileLimit": "",
-            "processLimit": "",
-            "custom_description_header": "",
-            "screenshot_header": "",
-            "disc_menu_header": "",
-            "audio_spectrogram_header": "",
-            "dynamic_hdr_plot_header": "",
-            "custom_signature": "",
-            "add_bluray_link": True,
-            "use_bluray_images": True,
-            "bluray_image_size": "",
-            "add_audio_spectrogram": True,
-            "inject_delay": 0,
-        },
         "ANTHELION": {
+            "cli_alias": "ANT",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             "api_key": "",
@@ -673,6 +685,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "ASIANCINEMA": {
+            "cli_alias": "ACM",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # "use_for_search": False, set to True if using this tracker for automatic ID searching or description parsing
@@ -713,6 +726,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "AVISTAZ": {
+            "cli_alias": "AZ",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # Cookies required (export from https://avistaz.to to data/cookies/AVISTAZ.txt).
@@ -722,6 +736,8 @@ config: dict[str, Any] = {
             # If True, the script performs a basic rules compliance check (e.g., codecs, region).
             # This does not cover all tracker rules. Set to False to disable.
             "check_for_rules": True,
+            # AvistaZ does not allow frame overlays; use cached non-overlay images or recapture them.
+            "image_tag_blacklist": ["overlay"],
             # The configurations below override the DEFAULT configuration
             "thumbnail_size": "",
             "screens_per_row": "",
@@ -735,6 +751,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "BEYONDHD": {
+            "cli_alias": "BHD",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # "use_for_search": False, set to True if using this tracker for automatic ID searching or description parsing
@@ -769,6 +786,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "BITHDTV": {
+            "cli_alias": "BHDTV",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # found under https://www.bit-hdtv.com/my.php
@@ -780,6 +798,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "BITPORN": {
+            "cli_alias": "BP",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             "api_key": "",
@@ -818,6 +837,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "BJSHARE": {
+            "cli_alias": "BJS",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # Cookies required (export from https://bj-share.info to data/cookies/BJSHARE.txt).
@@ -852,12 +872,15 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "BLUTOPIA": {
+            "cli_alias": "BLU",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # "use_for_search": False, set to True if using this tracker for automatic ID searching or description parsing
             "use_for_search": False,
             "api_key": "",
             "anon": True,
+            # Send uploads to the moderation queue for staff review and approval
+            "modq": False,
             # For authorized users only. Do not change this unless you know what you are doing
             # Upload as featured
             "featured": False,
@@ -892,6 +915,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "BRASILTRACKER": {
+            "cli_alias": "BT",
             "link_dir_name": "",
             # Cookies required (export from https://brasiltracker.org/ to data/cookies/BRASILTRACKER.txt).
             # See: https://github.com/wastaken7/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
@@ -918,9 +942,10 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "BROADCASTHENET": {
+            "cli_alias": "BTN",
             # BTN accepts TV only. An API key is required for dupe searching and
-            # downloading BTN's registered torrent; upload authentication uses
-            # browser-exported cookies in data/cookies/BROADCASTHENET.txt.
+            # resolving uploads that return a group page. Upload authentication
+            # uses browser-exported cookies in data/cookies/BROADCASTHENET.txt.
             "link_dir_name": "",
             "use_for_search": False,
             "api_key": "",
@@ -930,6 +955,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "CAPYBARABR": {
+            "cli_alias": "CBR",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # "use_for_search": False, set to True if using this tracker for automatic ID searching or description parsing
@@ -938,7 +964,7 @@ config: dict[str, Any] = {
             "anon": True,
             # BiOMA Zipline API key/token for rehosting screenshots when uploading releases with tag 'BiOMA' (Host: https://img.thebioma.space/)
             "bioma_api_key": "",
-            # Send uploads to CAPYBARABR modq for staff approval
+            # Send uploads to the moderation queue for staff review and approval
             "modq": False,
             # Set this to True if you want to allow external subtitles to be included in the upload
             "allow_ext_subtitles": True,
@@ -976,12 +1002,14 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "CATHODERAYTUBE": {
+            "cli_alias": "CRT",
             # Cookies required (export from https://www.cathode-ray.tube/ to data/cookies/CATHODERAYTUBE.txt).
             # See: https://github.com/wastaken7/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
             "announce_url": "",
             "anon": True,
         },
         "CINEMATIK": {
+            "cli_alias": "TIK",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # "use_for_search": False, set to True if using this tracker for automatic ID searching or description parsing
@@ -1022,6 +1050,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "CINEMAZ": {
+            "cli_alias": "CZ",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # Cookies required (export from https://cinemaz.to to data/cookies/CINEMAZ.txt).
@@ -1031,6 +1060,8 @@ config: dict[str, Any] = {
             # If True, the script performs a basic rules compliance check (e.g., codecs, region).
             # This does not cover all tracker rules. Set to False to disable.
             "check_for_rules": True,
+            # CinemaZ does not allow frame overlays.
+            "image_tag_blacklist": ["overlay"],
             # The configurations below override the DEFAULT configuration
             "thumbnail_size": "",
             "screens_per_row": "",
@@ -1044,6 +1075,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "CURUPIRA": {
+            "cli_alias": "CRP",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # Your API Key, obtained from Perfil -> API Key
@@ -1054,13 +1086,14 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "DARKPEERS": {
+            "cli_alias": "DP",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # "use_for_search": False, set to True if using this tracker for automatic ID searching or description parsing
             "use_for_search": False,
             "api_key": "",
             "anon": True,
-            # Send uploads to DARKPEERS modq for staff approval
+            # Send uploads to the moderation queue for staff review and approval
             "modq": False,
             # For authorized users only. Do not change this unless you know what you are doing
             # Upload as featured
@@ -1097,6 +1130,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "DESITORRENTS": {
+            "cli_alias": "DT",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # "use_for_search": False, set to True if using this tracker for automatic ID searching or description parsing
@@ -1137,11 +1171,14 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "DIGITALCORE": {
+            "cli_alias": "DC",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # You can find your api key at Settings -> Security -> API Key -> Generate API Key
             "api_key": "",
             "anon": True,
+            # Force DigitalCore uploads to re-host screenshots on img.digitalcore.club using DEFAULT.sharex_api_key.
+            "force_rehost_images": False,
             # If True, the script will use the metadata-based title instead of the directory/file name.
             "use_metadata_name": False,
             # The configurations below override the DEFAULT configuration
@@ -1168,6 +1205,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "DREADVAULT": {
+            "cli_alias": "DVL",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # "use_for_search": False, set to True if using this tracker for automatic ID searching or description parsing
@@ -1210,6 +1248,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "DRUNKENSLUG": {
+            "cli_alias": "DS",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # Provide the DRUNKENSLUG API key here, can be found at https://drunkenslug.com/profile
@@ -1222,6 +1261,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "EMUWAREZ": {
+            "cli_alias": "EMUW",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # "use_for_search": False, set to True if using this tracker for automatic ID searching or description parsing
@@ -1264,6 +1304,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "FILELIST": {
+            "cli_alias": "FL",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             "username": "",
@@ -1273,6 +1314,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "FLOOD": {
+            "cli_alias": "FLD",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             "api_key": "",
@@ -1280,6 +1322,7 @@ config: dict[str, Any] = {
             "anon": False,
         },
         "FUNFILE": {
+            "cli_alias": "FF",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             "username": "",
@@ -1313,6 +1356,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "GREATPOSTERWALL": {
+            "cli_alias": "GPW",
             "link_dir_name": "",
             # You can find your API key in Profile Settings -> Access Settings -> API Key. If there is no API, click "Reset your api key" and Save Profile.
             "api_key": "",
@@ -1345,6 +1389,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "HAWKEUNO": {
+            "cli_alias": "HUNO",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             "use_for_search": False,
@@ -1386,6 +1431,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "HDBITS": {
+            "cli_alias": "HDB",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # "use_for_search": False, set to True if using this tracker for automatic ID searching or description parsing
@@ -1400,6 +1446,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "HDSPACE": {
+            "cli_alias": "HDS",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # Cookies required (export from https://hd-space.org/ to data/cookies/HDSPACE.txt).
@@ -1431,6 +1478,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "HDTORRENTS": {
+            "cli_alias": "HDT",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # Cookies required (export to data/cookies/HDTORRENTS.txt).
@@ -1470,6 +1518,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "HOMIEHELPDESK": {
+            "cli_alias": "HHD",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             "api_key": "",
@@ -1508,6 +1557,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "IMMORTALSEED": {
+            "cli_alias": "IS",
             # Cookies required (export from https://immortalseed.me/ to data/cookies/IMMORTALSEED.txt).
             # See: https://github.com/wastaken7/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
@@ -1540,6 +1590,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "INFINITYHD": {
+            "cli_alias": "IHD",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # "use_for_search": False, set to True if using this tracker for automatic ID searching or description parsing
@@ -1580,6 +1631,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "IPTORRENTS": {
+            "cli_alias": "IPT",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # Cookies required (export to data/cookies/IPTORRENTS.txt).
@@ -1616,6 +1668,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "ITATORRENTS": {
+            "cli_alias": "ITT",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # "use_for_search": False, set to True if using this tracker for automatic ID searching or description parsing
@@ -1656,6 +1709,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "LAJIDUI": {
+            "cli_alias": "LAJIDUI",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # Cookies required (export from https://pt.lajidui.top/ to data/cookies/LAJIDUI.txt).
@@ -1686,6 +1740,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "LASTDIGITALUNDERGROUND": {
+            "cli_alias": "LDU",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # "use_for_search": False, set to True if using this tracker for automatic ID searching or description parsing
@@ -1726,13 +1781,14 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "LATTEAM": {
+            "cli_alias": "LT",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # "use_for_search": False, set to True if using this tracker for automatic ID searching or description parsing
             "use_for_search": False,
             "api_key": "",
             "anon": True,
-            # Send uploads to LATTEAM modq for staff approval
+            # Send uploads to the moderation queue for staff review and approval
             "modq": False,
             # For authorized users only. Do not change this unless you know what you are doing
             # Upload as featured
@@ -1768,6 +1824,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "LEMONHD": {
+            "cli_alias": "LHD",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # Cookies required (export from https://lemonhd.net/ to data/cookies/LEMONHD.txt).
@@ -1799,6 +1856,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "LOCADORA": {
+            "cli_alias": "LCD",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # "use_for_search": False, set to True if using this tracker for automatic ID searching or description parsing
@@ -1841,6 +1899,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "LONGPT": {
+            "cli_alias": "LPT",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # Cookies required (export from https://longpt.org/ to data/cookies/LONGPT.txt).
@@ -1871,13 +1930,14 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "LST": {
+            "cli_alias": "LST",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # "use_for_search": False, set to True if using this tracker for automatic ID searching or description parsing
             "use_for_search": False,
             "api_key": "",
             "anon": True,
-            # Send uploads to LST modq for staff approval
+            # Send uploads to the moderation queue for staff review and approval
             "modq": False,
             # Send uploads to LST drafts
             "draft": False,
@@ -1915,13 +1975,14 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "LUMINARR": {
+            "cli_alias": "LUME",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # "use_for_search": False, set to True if using this tracker for automatic ID searching or description parsing
             "use_for_search": False,
             "api_key": "",
             "anon": True,
-            # Send uploads to LUMINARR modq for staff approval
+            # Send uploads to the moderation queue for staff review and approval
             "modq": False,
             # For authorized users only. Do not change this unless you know what you are doing
             # Upload as featured
@@ -1957,6 +2018,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "MAKINGOFF": {
+            "cli_alias": "MKO",
             # Cookies required (export from https://www.makingoff.org/ to data/cookies/MAKINGOFF.txt).
             # See: https://github.com/wastaken7/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
@@ -1969,13 +2031,14 @@ config: dict[str, Any] = {
             "allow_ext_subtitles": True,
         },
         "MIDNIGHTSCENE": {
+            "cli_alias": "MS",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # "use_for_search": False, set to True if using this tracker for automatic ID searching or description parsing
             "use_for_search": False,
             "api_key": "",
             "anon": True,
-            # Send uploads to MIDNIGHTSCENE modq for staff approval
+            # Send uploads to the moderation queue for staff review and approval
             "modq": False,
             # For authorized users only. Do not change this unless you know what you are doing
             # Upload as featured
@@ -2011,6 +2074,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "MTEAM": {
+            "cli_alias": "MTEAM",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             "api_key": "",
@@ -2040,6 +2104,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "NEBULANCE": {
+            "cli_alias": "NBL",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             "api_key": "",
@@ -2047,6 +2112,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "NORDICQUALITY": {
+            "cli_alias": "NQ",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # "use_for_search": False, set to True if using this tracker for automatic ID searching or description parsing
@@ -2087,6 +2153,18 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "NZBGEEK": {
+            "cli_alias": "NZBG",
+            "api_key": "",
+            # Maximum number of API hits the script may make within 24 hours for duplicate search.
+            # Set to 0 to disable duplicate search via API.
+            "daily_api_hit_limit": 0,
+            # Only block uploads when the existing release exactly matches files.
+            "exact_match_only": False,
+            "inject_delay": 0,
+        },
+        "NZBNEST": {
+            "cli_alias": "NZBN",
+            # NzbNest API key
             "api_key": "",
             # Maximum number of API hits the script may make within 24 hours for duplicate search.
             # Set to 0 to disable duplicate search via API.
@@ -2096,12 +2174,13 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "OLDTOONSWORLD": {
+            "cli_alias": "OTW",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # "use_for_search": False, set to True if using this tracker for automatic ID searching or description parsing
             "use_for_search": False,
             "api_key": "",
-            # Send uploads to OLDTOONSWORLD modq for staff approval
+            # Send uploads to the moderation queue for staff review and approval
             "modq": False,
             "anon": True,
             # For authorized users only. Do not change this unless you know what you are doing
@@ -2138,6 +2217,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "ONLYENCODES": {
+            "cli_alias": "OE",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # "use_for_search": False, set to True if using this tracker for automatic ID searching or description parsing
@@ -2154,14 +2234,16 @@ config: dict[str, Any] = {
             # Upload as sticky/pinned
             "sticky": False,
             # The configurations below override the DEFAULT configuration
-            "add_logo": True,
+            # OnlyEncodes forbids description logos and requires linked medium screenshots
+            # from the first episode/movie rather than screenshots for every pack item.
+            "add_logo": False,
             "logo_size": "",
-            "thumbnail_size": "",
+            "thumbnail_size": 350,
             "screens_per_row": "",
             "episode_overview": True,
             "tonemapped_header": "[note]Screenshots have been adapted for SDR viewing, for reference only.[/note]",
-            "multiScreens": "",
-            "pack_thumb_size": "",
+            "multiScreens": 0,
+            "pack_thumb_size": 350,
             "charLimit": "",
             "fileLimit": "",
             "processLimit": "",
@@ -2178,6 +2260,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "ORPHEUS": {
+            "cli_alias": "OPS",
             # Orpheus Gazelle API token. Do not commit a real token.
             "api_key": "",
             # Obtain from https://orpheus.network/upload.php
@@ -2185,6 +2268,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "PASSTHEPOPCORN": {
+            "cli_alias": "PTP",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # "use_for_search": False, set to True if using this tracker for automatic ID searching or description parsing
@@ -2198,6 +2282,7 @@ config: dict[str, Any] = {
             "inject_delay": 5,
         },
         "PEERGARDEN": {
+            "cli_alias": "PG",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # "use_for_search": False, set to True if using this tracker for automatic ID searching or description parsing
@@ -2206,7 +2291,7 @@ config: dict[str, Any] = {
             "anon": True,
             # Only block uploads when the existing release exactly matches files and size.
             "exact_match_only": True,
-            # Send uploads to PEERGARDEN modq for staff approval
+            # Send uploads to the moderation queue for staff review and approval
             "modq": False,
             # For authorized users only. Do not change this unless you know what you are doing
             # Upload as featured
@@ -2242,6 +2327,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "POLISHTORRENT": {
+            "cli_alias": "PTT",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # "use_for_search": False, set to True if using this tracker for automatic ID searching or description parsing
@@ -2282,6 +2368,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "PORTUGAS": {
+            "cli_alias": "PT",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # "use_for_search": False, set to True if using this tracker for automatic ID searching or description parsing
@@ -2322,6 +2409,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "PRIVATEHD": {
+            "cli_alias": "PHD",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # Cookies required (export from https://privatehd.to/ to data/cookies/PRIVATEHD.txt).
@@ -2331,6 +2419,8 @@ config: dict[str, Any] = {
             # If True, the script performs a basic rules compliance check (e.g., codecs, region).
             # This does not cover all tracker rules. Set to False to disable.
             "check_for_rules": True,
+            # PrivateHD does not allow frame overlays.
+            "image_tag_blacklist": ["overlay"],
             # The configurations below override the DEFAULT configuration
             "thumbnail_size": "",
             "screens_per_row": "",
@@ -2344,6 +2434,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "PTCAFE": {
+            "cli_alias": "PTCAFE",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # Cookies required (export from https://ptcafe.club/ to data/cookies/PTCAFE.txt).
@@ -2375,6 +2466,7 @@ config: dict[str, Any] = {
         },
         # PTERCLUB support is currently experimental and may not work reliably.
         "PTERCLUB": {
+            "cli_alias": "PTER",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             "passkey": "passkey",
@@ -2386,6 +2478,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "PTFANS": {
+            "cli_alias": "PTFANS",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # Cookies required (export from https://ptfans.cc/ to data/cookies/PTFANS.txt).
@@ -2416,6 +2509,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "PTGTK": {
+            "cli_alias": "PTGTK",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # Cookies required (export from https://pt.gtkpw.xyz to data/cookies/PTGTK.txt).
@@ -2446,6 +2540,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "PTSKIT": {
+            "cli_alias": "PTS",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # Cookies required (export from https://www.ptskit.org to data/cookies/PTSKIT.txt).
@@ -2475,6 +2570,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "PTZONE": {
+            "cli_alias": "PTZ",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # Cookies required (export from https://ptzone.xyz/ to data/cookies/PTZONE.txt).
@@ -2507,6 +2603,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "RACING4EVERYONE": {
+            "cli_alias": "R4E",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # "use_for_search": False, set to True if using this tracker for automatic ID searching or description parsing
@@ -2548,6 +2645,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "RAILGUNPT": {
+            "cli_alias": "RPT",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # Cookies required (export from https://bilibili.download to data/cookies/RAILGUNPT.txt).
@@ -2578,6 +2676,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "RASTASTUGAN": {
+            "cli_alias": "RAS",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # "use_for_search": False, set to True if using this tracker for automatic ID searching or description parsing
@@ -2618,6 +2717,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "REELFLIX": {
+            "cli_alias": "RF",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # "use_for_search": False, set to True if using this tracker for automatic ID searching or description parsing
@@ -2658,6 +2758,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "RETROFLIX": {
+            "cli_alias": "RTF",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             "username": "",
@@ -2690,13 +2791,14 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "RETROMOVIESCLUB": {
+            "cli_alias": "RMC",
             # Instead of using the tracker name for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # "use_for_search": False, set to True if you want to use Retro Movies Club for automatic ID searching or description parsing
             "use_for_search": False,
             "api_key": "",
             "anon": True,
-            # Send uploads to Retro Movies Club modq for staff approval
+            # Send uploads to the moderation queue for staff review and approval
             "modq": False,
             # For authorized users only. Do not change this unless you know what you are doing
             # Upload as featured
@@ -2732,6 +2834,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "ROCKETHD": {
+            "cli_alias": "RHD",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # "use_for_search": False, set to True if you want to use RocketHD for automatic ID searching or description parsing
@@ -2742,11 +2845,16 @@ config: dict[str, Any] = {
             "use_german_title": False,
         },
         "SAMARITANO": {
+            "cli_alias": "SAM",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # "use_for_search": False, set to True if using this tracker for automatic ID searching or description parsing
             "use_for_search": False,
             "api_key": "",
+            # API key for the tracker-only image host at https://img.samaritano.cc/
+            "image_host_api_key": "",
+            # Rehost this tracker's images on img.samaritano.cc. Failures keep the default image host.
+            "force_rehost_images": False,
             "anon": True,
             # Set this to True if you want to allow external subtitles to be included in the upload
             "allow_ext_subtitles": True,
@@ -2784,11 +2892,13 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "SEEDPOOL": {
+            "cli_alias": "SP",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # "use_for_search": False, set to True if using this tracker for automatic ID searching or description parsing
             "use_for_search": False,
             "api_key": "",
+            "anon": True,
             # Only block uploads when the existing release exactly matches files and size.
             "exact_match_only": False,
             # For authorized users only. Do not change this unless you know what you are doing
@@ -2825,6 +2935,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "SHAREISLAND": {
+            "cli_alias": "SHRI",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # "use_for_search": False, set to True if using this tracker for automatic ID searching or description parsing
@@ -2867,6 +2978,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "SKIPTHECOMMERCIALS": {
+            "cli_alias": "STC",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # "use_for_search": False, set to True if using this tracker for automatic ID searching or description parsing
@@ -2907,6 +3019,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "SPEEDAPP": {
+            "cli_alias": "SPD",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # You can create an API key here https://speedapp.io/profile/api-tokens. Required Permission: Upload torrents
@@ -2939,6 +3052,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "SUIO": {
+            "cli_alias": "SUIO",
             # Secret Usenet Indexer: o[redacted]nzbs
             # Please do not share, discuss or mention this indexer's real name in issues or pull requests; nor should you ask what it is.
             # Paste the indexer's base url below (e.g., https://indexer.com)
@@ -2966,6 +3080,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "SWARMAZON": {
+            "cli_alias": "SN",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             "api_key": "",
@@ -2973,6 +3088,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "THELEACHZONE": {
+            "cli_alias": "TLZ",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # "use_for_search": False, set to True if using this tracker for automatic ID searching or description parsing
@@ -3013,6 +3129,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "THEOLDSCHOOL": {
+            "cli_alias": "TOS",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # Mon profil > Réglages > Clé API
@@ -3058,13 +3175,14 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "TORRENTEROS": {
+            "cli_alias": "TTR",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # "use_for_search": False, set to True if using this tracker for automatic ID searching or description parsing
             "use_for_search": False,
             "api_key": "",
             "anon": True,
-            # Send to modq for staff approval
+            # Send uploads to the moderation queue for staff review and approval
             "modq": False,
             # For authorized users only. Do not change this unless you know what you are doing
             # Upload as featured
@@ -3100,11 +3218,13 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "TORRENTHR": {
+            "cli_alias": "THR",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # "use_for_search": False, set to True if using this tracker for automatic ID searching or description parsing
             "use_for_search": False,
             "api_key": "",
+            "anon": True,
             # For authorized users only. Do not change this unless you know what you are doing
             # Upload as featured
             "featured": False,
@@ -3139,6 +3259,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "TORRENTLEECH": {
+            "cli_alias": "TL",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # Set to False if you don't have access to the API (e.g., if you're a trial uploader). Note: this may not work sometimes due to Cloudflare restrictions.
@@ -3177,6 +3298,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "TOTHEGLORY": {
+            "cli_alias": "TTG",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             "username": "",
@@ -3189,6 +3311,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "TVCHAOSUK": {
+            "cli_alias": "TVC",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # 2 is listed as max images in rules. Please do not change unless you have permission
@@ -3199,13 +3322,14 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "ULCX": {
+            "cli_alias": "ULCX",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # "use_for_search": False, set to True if using this tracker for automatic ID searching or description parsing
             "use_for_search": False,
             "api_key": "",
             "anon": True,
-            # Send to modq for staff approval
+            # Send uploads to the moderation queue for staff review and approval
             "modq": False,
             # For authorized users only. Do not change this unless you know what you are doing
             # Upload as featured
@@ -3241,6 +3365,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "UTOPIA": {
+            "cli_alias": "UTP",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # "use_for_search": False, set to True if using this tracker for automatic ID searching or description parsing
@@ -3315,6 +3440,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "XINGYUNGEPT": {
+            "cli_alias": "XYPT",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # Cookies required (export from https://pt.xingyungept.org/ to data/cookies/XINGYUNGEPT.txt).
@@ -3347,6 +3473,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "YUSCENE": {
+            "cli_alias": "YUS",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # "use_for_search": False, set to True if using this tracker for automatic ID searching or description parsing
@@ -3387,12 +3514,15 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "ZENITH": {
+            "cli_alias": "ZNTH",
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # "use_for_search": False, set to True if using this tracker for automatic ID searching or description parsing
             "use_for_search": False,
             "api_key": "",
             "anon": True,
+            # Send uploads to the moderation queue for staff review and approval
+            "modq": False,
             # For authorized users only. Do not change this unless you know what you are doing
             # Upload as featured
             "featured": False,
@@ -3427,6 +3557,7 @@ config: dict[str, Any] = {
             "inject_delay": 0,
         },
         "MANUAL": {
+            "cli_alias": "MANUAL",
             # Replace link with filebrowser (https://github.com/filebrowser/filebrowser) link to the Upload-Assistant directory, this will link to your filebrowser instead of uploading to uguu.se
             "filebrowser": "",
         },
@@ -3440,10 +3571,10 @@ config: dict[str, Any] = {
         # See https://github.com/wastaken7/Upload-Assistant/blob/development/docs/configuration.md#torrent-clients
         "qbittorrent": {
             "torrent_client": "qbit",
-            # QUI reverse proxy: https://getqui.com/docs/features/reverse-proxy
-            # Create a Client Proxy API Key in QUI (Settings → Client Proxy Keys), pick the instance, paste the full proxy URL here.
+            # qui reverse proxy: https://getqui.com/docs/features/reverse-proxy
+            # Create a Client Proxy API Key in qui (Settings → Client Proxy Keys), pick the instance, paste the full proxy URL here.
             # Example: "http://localhost:7476/proxy/<your-client-api-key>".
-            # QUI is not used for bandwidth measurements; see docs/upload-order-and-bandwidth-control.md.
+            # qui is not used for bandwidth measurements; see docs/upload-order-and-bandwidth-control.md.
             "qui_proxy_url": "",
             # enable_search to True will automatically try and find a suitable hash to save having to rehash when creating torrents
             "enable_search": True,
@@ -3453,7 +3584,7 @@ config: dict[str, Any] = {
             "qbit_pass": "",
             # API Key authentication (stateless, qBittorrent v5.2.0+). When set, qbit_user and qbit_pass are ignored.
             "qbit_api_key": "",
-            # Optional qBittorrent BT_backup directory. Used together with QUI/API search;
+            # Optional qBittorrent BT_backup directory. Used together with qui/API search;
             # reading .torrent files locally can substantially speed up candidate validation.
             # Use double-backslashes on Windows, e.g. "C:\\Users\\<YOUR_USER>\\AppData\\Local\\qBittorrent\\BT_backup".
             # WARNING: this should not be used when using SQLite Mode for qBittorrent.
@@ -3467,9 +3598,11 @@ config: dict[str, Any] = {
             "use_tracker_as_tag": False,
             "qbit_tag": "",
             "qbit_cat": "",
-            # If using cross seeding, add cross seed tag/category here
+            # If using cross-seeding, add its qBittorrent tag/category here.
             "qbit_cross_tag": "",
             "qbit_cross_cat": "",
+            # qBittorrent content layout for all torrents added through this client.
+            # Use "Original", "Subfolder", or "NoSubfolder".
             "content_layout": "Original",
             # Choose symbolic links, hard links, or an empty value to use the original path.
             # This will disable any automatic torrent management if set.
@@ -3495,10 +3628,10 @@ config: dict[str, Any] = {
         "qbittorrent_searching": {
             # an example of using a qBitTorrent client just for searching, when using another client for injection
             "torrent_client": "qbit",
-            # QUI reverse proxy: https://getqui.com/docs/features/reverse-proxy
-            # Create a Client Proxy API Key in QUI (Settings → Client Proxy Keys), pick the instance, paste the full proxy URL here.
+            # qui reverse proxy: https://getqui.com/docs/features/reverse-proxy
+            # Create a Client Proxy API Key in qui (Settings → Client Proxy Keys), pick the instance, paste the full proxy URL here.
             # Example: "http://localhost:7476/proxy/<your-client-api-key>".
-            # QUI is not used for bandwidth measurements; see docs/upload-order-and-bandwidth-control.md.
+            # qui is not used for bandwidth measurements; see docs/upload-order-and-bandwidth-control.md.
             "qui_proxy_url": "",
             # enable_search to True will automatically try and find a suitable hash to save having to rehash when creating torrents
             "enable_search": True,
@@ -3596,10 +3729,18 @@ config: dict[str, Any] = {
         "par2_percentage": "10",
         # Obfuscate the subject line of the NNTP post to prevent DMCA takedowns
         "obscure_subject": True,
+        # Pesto only: "light" also keeps archive filenames opaque inside the
+        # NZB; "full" hides them on NNTP but restores readable names in the NZB.
+        # Existing configs without this key retain Pesto's previous "full" mode.
+        "pesto_obfuscation_mode": "light",
         # --- UPLOADER AND VERIFICATION ---
         # Uploader backend: "nyuu" (default) or "pesto"
         # pesto handles PAR2 and NZB password injection internally
         "usenet_uploader": "nyuu",
+        # pesto only: for TV season packs, upload each top-level episode as an
+        # independent release and also generate a consolidated season NZB.
+        # Every generated NZB is then submitted to the configured indexers.
+        "pesto_season_upload": False,
         # pesto only: a streaming STAT check that runs concurrently with the
         # upload, confirming each article shortly after it posts. Missing
         # articles are reposted and reverified automatically; the upload is

@@ -2,6 +2,7 @@
 import asyncio
 import json
 import re
+import time
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import quote, urlparse
@@ -17,9 +18,11 @@ from src.console import console, logger
 from src.description_review import get_base_description
 from src.exceptions import *  # noqa F403
 from src.meta import Meta
+from src.stats import record_event_async
 from src.temp_paths import screenshots_dir
-from src.torrentcreate import TorrentCreator
+from src.torrent_policy import HDBITS_POLICY
 from src.trackers.common import Common
+from src.trackers.naming import add_incomplete_pack_marker
 
 Config = dict[str, Any]
 
@@ -37,7 +40,9 @@ class HDBits:
     signature: str | None = None
     banned_groups: tuple[str, ...] = ("",)
     base_url = "https://hdbits.org"
+    torrent_url = f"{base_url}/details.php?id="
     supported_categories = ("TV", "MOVIE")
+    torrent_policy = HDBITS_POLICY
     tracker_urls = ("https://tracker.hdbits.org",)
 
     def __init__(self, config: Config) -> None:
@@ -233,7 +238,7 @@ class HDBits:
         hdb_name = hdb_name.replace("DTS-HD HRA", "DTS-HD HR")
         hdb_name = " ".join(hdb_name.split())
         hdb_name = re.sub(r"[^0-9a-zA-ZÀ-ÿ. :&+'\-\[\]]+", "", hdb_name)
-        return hdb_name.replace(" .", ".").replace("..", ".")
+        return add_incomplete_pack_marker(hdb_name.replace(" .", ".").replace("..", "."), meta, self.tracker)
 
     async def upload(self, meta: Meta) -> bool | None:
         common = Common(config=self.config)
@@ -255,28 +260,8 @@ class HDBits:
         async with aiofiles.open(f"{meta.base_dir}{'/' + 'tmp' + '/'}{meta.uuid}/[{self.tracker}]DESCRIPTION.txt", encoding="utf-8") as desc_file:
             hdb_desc = await desc_file.read()
 
-        base_piece_mb = meta.base_torrent_piece_mb or 0
         torrent_file_path = f"{meta.base_dir}{'/' + 'tmp' + '/'}{meta.uuid}/[{self.tracker}].torrent"
-
-        # Check if the piece size exceeds 16 MiB and regenerate the torrent if needed
-        if base_piece_mb > 16 and not meta.nohash:
-            logger.info(f"{self.tracker}: [red]Piece size is OVER 16M and does not work on {self.tracker}. Generating a new .torrent")
-            hdb_config = self.config.get("TRACKERS", {}).get("HDBITS", {})
-            hdb_config_dict = cast(dict[str, Any], hdb_config) if isinstance(hdb_config, dict) else {}
-            tracker_url = str(hdb_config_dict.get("announce_url", "https://fake.tracker")).strip()
-            piece_size = 16
-            torrent_create = f"[{self.tracker}]"
-            try:
-                cooldown = int(self.config.get("DEFAULT", {}).get("rehash_cooldown", 0) or 0)
-            except ValueError, TypeError:
-                cooldown = 0
-            if cooldown > 0:
-                await asyncio.sleep(cooldown)  # Small cooldown before rehashing
-
-            await TorrentCreator.create_torrent(meta, str(meta.path), torrent_create, tracker_url=tracker_url, piece_size=piece_size)
-            await common.create_torrent_for_upload(meta, self.tracker, self.source_flag, torrent_filename=torrent_create)
-        else:
-            await common.create_torrent_for_upload(meta, self.tracker, self.source_flag)
+        await common.create_torrent_for_upload(meta, self.tracker, self.source_flag)
 
         # Proceed with the upload process
         async with aiofiles.open(torrent_file_path, "rb") as torrent_file:
@@ -335,6 +320,7 @@ class HDBits:
         match = re.match(rf".*?{re.escape(self.base_url.replace('https://', ''))}/details\.php\?id=(\d+)&uploaded=(\d+)", str(up.url))
         if match:
             meta.tracker_status[self.tracker]["status_message"] = match.group(0)
+            meta.tracker_status[self.tracker]["torrent_id"] = match.group(1)
             if id_match := re.search(r"(id=)(\d+)", urlparse(str(up.url)).query):
                 id = id_match.group(2)
                 await self.download_new_torrent(id, torrent_file_path)
@@ -587,6 +573,25 @@ class HDBits:
 
         return
 
+    async def _post_image_batch(self, url: str, data: dict[str, Any], files: dict[str, tuple[str, bytes, str]]) -> httpx.Response:
+        started = time.monotonic()
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(url, data=data, files=files)
+        except Exception:
+            await record_event_async("api", service="hdbimg", operation="image_upload", outcome="error", duration_ms=(time.monotonic() - started) * 1000)
+            raise
+        uploaded = response.status_code == 200
+        await record_event_async(
+            "api",
+            service="hdbimg",
+            operation="image_upload",
+            outcome="success" if uploaded else "error",
+            duration_ms=(time.monotonic() - started) * 1000,
+            bytes_count=sum(len(file_bytes) for _, file_bytes, _ in files.values()) if uploaded else 0,
+        )
+        return response
+
     async def hdbimg_upload(self, meta: Meta) -> str | None:
         bbcode = ""
         response: httpx.Response | None = None
@@ -762,8 +767,7 @@ class HDBits:
                         chunk_size_mb = sum(Path(all_image_files[int(key.split("[")[1].split("]")[0])]).stat().st_size for key, _ in chunk) / (1024 * 1024)
                         logger.debug(f"{self.tracker}: [cyan]Uploading chunk {chunk_idx + 1}/{len(chunks)} ({len(file_list)} images, {chunk_size_mb:.2f} MiB)")
 
-                    async with httpx.AsyncClient(timeout=30.0) as client:
-                        response = await client.post(url, data=data, files=file_list)
+                    response = await self._post_image_batch(url, data, file_list)
                     if response.status_code == 200:
                         logger.info(f"{self.tracker}: [green]Chunk {chunk_idx + 1}/{len(chunks)} upload successful!")
                         bbcode += response.text
@@ -772,8 +776,7 @@ class HDBits:
                         upload_success = False
                         break
             else:
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    response = await client.post(url, data=data, files=upload_files)
+                response = await self._post_image_batch(url, data, upload_files)
                 if response.status_code == 200:
                     logger.info(f"{self.tracker}: [green]Upload successful!")
                     bbcode = response.text

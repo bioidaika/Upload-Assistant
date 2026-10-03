@@ -1,0 +1,124 @@
+"""Regression tests for Zenith-specific names."""
+
+import asyncio
+
+from src.meta import Meta
+from src.trackers.UNIT3D.zenith import Zenith
+
+
+def test_zenith_supports_music_and_uses_its_music_naming_guide():
+    meta = Meta(
+        category="MUSIC",
+        tag="-FiVE0",
+        music_release={
+            "fields": {
+                "artist": {"value": "Example Band"},
+                "album": {"value": "Sample Single"},
+                "release_year": {"value": "2010"},
+                "media": {"value": "WEB"},
+                "format": {"value": "FLAC"},
+                "release_type": {"value": "Single"},
+            },
+            "tracks": [{"codec": "FLAC", "bit_depth": 24, "sample_rate": 44100}],
+        },
+    )
+
+    tracker = Zenith({"DEFAULT": {}, "TRACKERS": {"ZENITH": {}}})
+
+    assert "MUSIC" in tracker.supported_categories
+    assert asyncio.run(tracker.get_name(meta))["name"] == "Example Band - Sample Single (2010) - [WEB FLAC 24bit-44.1kHz Single]-FiVE0"
+
+
+def test_zenith_music_name_omits_calculated_lossless_bitrate():
+    meta = Meta(
+        category="MUSIC",
+        music_release={
+            "fields": {
+                "artist": {"value": "Example Rapper"},
+                "album": {"value": "Invented Album"},
+                "release_year": {"value": "2008"},
+                "media": {"value": "CD"},
+                "format": {"value": "FLAC"},
+            },
+            "tracks": [{"codec": "FLAC", "bit_depth": 16, "sample_rate": 44100, "bitrate": 737000}],
+        },
+    )
+
+    name = asyncio.run(Zenith({"DEFAULT": {}, "TRACKERS": {"ZENITH": {}}}).get_name(meta))["name"]
+
+    assert name == "Example Rapper - Invented Album (2008) - [CD FLAC 16bit-44.1kHz]"
+
+
+def test_zenith_music_additional_data_sends_valid_external_ids():
+    meta = Meta(
+        category="MUSIC",
+        music_release={
+            "external_ids": {
+                "musicbrainz_release": "c0d17e85-3a36-4dc8-9a88-c188a5e78b0d",
+                "musicbrainz_release_group": "3bdb2b21-f6f5-3f8b-a1e0-067f8bb71940",
+                "discogs_release": "1791341",
+                "discogs_master": "28700",
+            }
+        },
+    )
+
+    data = asyncio.run(Zenith({"DEFAULT": {}, "TRACKERS": {"ZENITH": {}}}).get_additional_data(meta))
+
+    assert data == {
+        "mod_queue_opt_in": "0",
+        "exists_on_musicbrainz": "1",
+        "musicbrainz_release_id": "c0d17e85-3a36-4dc8-9a88-c188a5e78b0d",
+        "musicbrainz_release_group_id": "3bdb2b21-f6f5-3f8b-a1e0-067f8bb71940",
+        "exists_on_discogs": "1",
+        "discogs_release_id": "1791341",
+        "discogs_master_id": "28700",
+    }
+
+
+def test_zenith_music_additional_data_omits_invalid_or_disabled_external_ids():
+    meta = Meta(
+        category="MUSIC",
+        music_discogs_enabled=False,
+        music_release={"external_ids": {"musicbrainz_release": "invalid", "discogs_release": "not-a-number"}},
+    )
+
+    assert asyncio.run(Zenith({"DEFAULT": {}, "TRACKERS": {"ZENITH": {}}}).get_additional_data(meta)) == {"mod_queue_opt_in": "0"}
+
+
+def test_zenith_additional_data_opts_into_moderation_queue():
+    tracker = Zenith({"DEFAULT": {}, "TRACKERS": {"ZENITH": {}}})
+
+    assert asyncio.run(tracker.get_additional_data(Meta(modq=True))) == {"mod_queue_opt_in": "1"}
+
+
+def test_zenith_music_type_id_comes_from_the_analyzed_codec():
+    meta = Meta(category="MUSIC", music_release={"fields": {"format": {"value": "FLAC"}}})
+
+    type_data = asyncio.run(Zenith({"DEFAULT": {}, "TRACKERS": {"ZENITH": {}}}).get_type_id(meta))
+
+    assert type_data == {"type_id": "7"}
+
+
+def test_zenith_reported_ids():
+    tracker = Zenith({"DEFAULT": {}, "TRACKERS": {"ZENITH": {}}})
+    meta = Meta()
+
+    assert asyncio.run(tracker.get_category_id(meta, mapping_only=True))["SOFTWARE"] == "8"
+    types = asyncio.run(tracker.get_type_id(meta, mapping_only=True))
+    assert {name: types[name] for name in ("CONSOLE", "PC", "EDUCATIONAL", "LIVE SPORTS")} == {
+        "CONSOLE": "18",
+        "PC": "17",
+        "EDUCATIONAL": "15",
+        "LIVE SPORTS": "14",
+    }
+    resolutions = asyncio.run(tracker.get_resolution_id(meta, mapping_only=True))
+    assert resolutions["540p"] == "12"
+    assert resolutions["1440p"] == "11"
+
+
+def test_zenith_game_type_uses_platform():
+    tracker = Zenith({"DEFAULT": {}, "TRACKERS": {"ZENITH": {}}})
+
+    assert asyncio.run(tracker.get_type_id(Meta(category="GAME", console_game=True))) == {"type_id": "18"}
+    assert asyncio.run(tracker.get_type_id(Meta(category="GAME", platform="Windows"))) == {"type_id": "17"}
+    assert asyncio.run(tracker.get_type_id(Meta(category="GAME"))) == {"type_id": "16"}

@@ -3,6 +3,7 @@ import asyncio
 import json
 import platform
 import re
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -20,8 +21,10 @@ from src.cookie_auth import CookieValidator
 from src.get_desc import DescriptionBuilder
 from src.languages import languages_manager
 from src.meta import Meta
+from src.stats import record_event_async
 from src.temp_paths import screenshots_dir
 from src.trackers.common import Common
+from src.trackers.naming import add_incomplete_pack_marker
 
 Config = dict[str, Any]
 
@@ -83,8 +86,7 @@ class AZTrackerBase:
         else:
             return False
 
-        imdb_info = meta.imdb_info
-        imdb_id: str = str(imdb_info.get("imdbID", ""))
+        imdb_id: str = meta.imdb_tt
         tmdb_id: str = str(meta.tmdb) if meta.tmdb is not None else ""
         title = meta.title
 
@@ -453,6 +455,8 @@ class AZTrackerBase:
 
         files = {"qqfile": (filename, image_bytes, "image/png")}
 
+        started = time.monotonic()
+        uploaded = False
         try:
             response = await self.session.post(upload_url, headers=headers, data=data, files=files)
 
@@ -460,7 +464,8 @@ class AZTrackerBase:
                 json_data = response.json()
                 if json_data.get("success"):
                     image_id = json_data.get("imageId")
-                    return str(image_id) if image_id is not None else None
+                    uploaded = image_id is not None
+                    return str(image_id) if uploaded else None
                 error_message = json_data.get("error", "Unknown image host error.")
                 logger.info(f"{self.tracker}: Error uploading {filename}: {error_message}", extra={"markup": False})
                 return None
@@ -469,6 +474,15 @@ class AZTrackerBase:
         except Exception as e:
             logger.info(f"{self.tracker}: Exception when uploading {filename}: {e}", extra={"markup": False})
             return None
+        finally:
+            await record_event_async(
+                "api",
+                service=self.tracker,
+                operation="image_upload",
+                outcome="success" if uploaded else "error",
+                duration_ms=(time.monotonic() - started) * 1000,
+                bytes_count=len(image_bytes) if uploaded else 0,
+            )
 
     async def get_screenshots(self, meta: Meta) -> list[str] | None:
         screens_dir = screenshots_dir(meta.base_dir, meta.uuid)
@@ -611,10 +625,7 @@ class AZTrackerBase:
     async def get_tags(self, meta: Meta) -> list[str]:
         tags: list[str] = []
 
-        genres = meta.keywords
-        if not genres:
-            return tags
-
+        genres = meta.keywords or []
         # cleans spaces and normalizes to lowercase
         phrases = [re.sub(r"\s+", " ", x.strip().lower()) for x in genres if x.strip()]
 
@@ -860,14 +871,17 @@ class AZTrackerBase:
                 # Use the season-specific year if found, otherwise fall back to meta year
                 if season_year:
                     year_to_use = season_year
-                if year_to_use:
-                    upload_name = upload_name.replace(meta.title, f"{meta.title} {year_to_use}", 1)
+                if year_to_use and (self.tracker != "AVISTAZ" or meta.tv_pack):
+                    if self.tracker == "AVISTAZ":
+                        title_and_season = rf"{re.escape(meta.title)}\s+S\d{{2}}"
+                        upload_name, matched = re.subn(title_and_season, lambda match: f"{match.group()} ({year_to_use})", upload_name, count=1)
+                        if not matched:
+                            upload_name = upload_name.replace(meta.title, f"{meta.title} ({year_to_use})", 1)
+                    else:
+                        upload_name = upload_name.replace(meta.title, f"{meta.title} {year_to_use}", 1)
 
             if self.tracker == "PRIVATEHD" and year_to_use:
                 upload_name = upload_name.replace(str(year_to_use), "")
-
-            if self.tracker == "AVISTAZ" and meta.tv_pack and year_to_use:
-                upload_name = upload_name.replace(f"{meta.title} {year_to_use} {meta.season}", f"{meta.title} {meta.season} {year_to_use}")
 
         source = meta.source
         audio = meta.audio
@@ -887,7 +901,7 @@ class AZTrackerBase:
                 codec_suffix = f" {video_codec}" if video_codec else ""
                 upload_name = upload_name.replace(audio, f"{audio}{codec_suffix}")
 
-        return re.sub(r"\s{2,}", " ", upload_name)
+        return add_incomplete_pack_marker(re.sub(r"\s{2,}", " ", upload_name), meta, self.tracker)
 
     def get_rip_type(self, meta: Meta, display_name: bool = False) -> str:
         # Translation from meta keywords to site display labels
@@ -1036,7 +1050,7 @@ class AZTrackerBase:
 
         issue = self.check_data(meta, data)
         if issue:
-            meta.tracker_status[self.tracker] = f"data error - {issue}"
+            meta.tracker_status[self.tracker]["status_message"] = f"data error - {issue}"
             return False
         if not meta.debug:
             response = await self.session.post(self.upload_url_step2, data=data)

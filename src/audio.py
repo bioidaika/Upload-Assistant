@@ -403,10 +403,15 @@ async def _get_audio_v2(
 
                     # First pass: collect all audio languages and set flags
                     non_eng_non_orig_languages: list[str] = []
+                    distinct_audio_languages: set[str] = set()
                     for t in audio_tracks:
                         audio_language = str(t.get("Language") or "")
                         logger.debug(f"DEBUG: Audio Language = {audio_language}")
                         audio_language = audio_language.lower().strip()
+                        if audio_language and not audio_language.startswith(("zx", "xx", "und")):
+                            # Collapse regional tags (for example pt-BR and pt-PT)
+                            # so multiple dubs in the same language do not become MULTI.
+                            distinct_audio_languages.add(audio_language.replace("_", "-").split("-", 1)[0])
                         if audio_language.startswith("en"):
                             logger.debug(f"DEBUG: Found English audio track: {audio_language}")
                             eng = True
@@ -433,7 +438,7 @@ async def _get_audio_v2(
                         bloated_check(meta, non_eng_non_orig_languages, is_eng_original_with_non_eng=is_eng_original)
 
                     if ((eng and (orig or non_en_non_commentary)) or (orig and non_en_non_commentary)) and len(audio_tracks) > 1 and not meta.no_dual:
-                        dual = "MULTI" if len(audio_tracks) >= 3 else "Dual-Audio"
+                        dual = "MULTI" if len(distinct_audio_languages) >= 3 else "Dual-Audio"
                         meta.dual_audio = dual == "Dual-Audio"
                     elif eng and not orig and orig_lang not in ["zxx", "xx", "en", None] and not meta.no_dub:
                         dual = "Dubbed"
@@ -507,9 +512,6 @@ async def _get_audio_v2(
         codec = audio_codec_map.get(format_str, "") + audio_extra.get(additional_str, "")
         extra = format_extra.get(additional_str, "")
 
-    format_settings = format_settings_extra.get(format_settings, "")
-    format_settings = "EX" if format_settings == "EX" and chan == "5.1" else ""
-
     if codec == "":
         codec = format_str
 
@@ -525,6 +527,9 @@ async def _get_audio_v2(
     if codec == "DD" and chan == "7.1":
         logger.info("[warning] Detected codec is DD but channel count is 7.1, correcting to DD+")
         codec = "DD+"
+
+    format_settings = format_settings_extra.get(format_settings, "")
+    format_settings = "EX" if format_settings == "EX" and (chan == "5.1" or (codec == "DD+" and chan == "7.1")) else ""
 
     if not extra and is_auro3d:
         extra = " Auro3D"
@@ -674,9 +679,16 @@ def dts_core_additional_check(meta: Meta) -> None:
                 if track_one_is_dts_hd_ma and track_two_is_lossy_dts:
                     hd_idx, lossy_idx = i + 1, j + 1
                     hd_track = track_one
+                    lossy_track = track_two
                 else:
                     hd_idx, lossy_idx = j + 1, i + 1
                     hd_track = track_two
+                    lossy_track = track_one
+
+                commentary_label = any("commentary" in str(lossy_track.get(field) or "").lower() for field in ("Title", "title", "TrackTitle", "ServiceKind"))
+                commentary_service = "C" in {kind.strip().upper() for kind in str(lossy_track.get("ServiceKind") or "").split("/")}
+                if commentary_label or commentary_service:
+                    continue
 
                 logger.debug(
                     f"[yellow]DEBUG: Detected potential DTS core duplicate between tracks {i + 1} and {j + 1}, matched on properties: (Duration={hd_track.get('Duration')}, FrameRate={hd_track.get('FrameRate')}, FrameCount={hd_track.get('FrameCount')}, Language={hd_track.get('Language')})[/yellow]"

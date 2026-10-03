@@ -53,6 +53,10 @@ class Meta:
     audio_spectrogram: bool | None = None
     dynamic_hdr_plot: bool | None = None
     audio: str = ""
+    audible_url: str = ""
+    audible_authors: list[dict[str, str]] = field(default_factory=list)
+    audible_rating_average: float | None = None
+    audible_rating_count: int | None = None
     audiobook_bitrate: int | None = None
     audiobook_duration_formatted: str | None = None
     audiobook_duration: float | None = None
@@ -80,6 +84,7 @@ class Meta:
     book_isbn: str | None = None
     book_language_iso: str = ""
     book_language: str = ""
+    book_narrator: str | None = None
     book_overview: str | None = None
     book_publisher: str | None = None
     book_series_index: str = ""
@@ -95,6 +100,8 @@ class Meta:
     client: str | None = None
     combined_genres: list[str] | str = field(default_factory=list)
     comic: bool = False
+    content_duration_category: str = ""
+    content_duration_seconds: float | None = None
     comparison_groups: dict[str, dict[str, Any]] | list[dict[str, Any]] = field(default_factory=dict)
     comparison_index: int | None = None
     comparison: str | None = None
@@ -172,17 +179,46 @@ class Meta:
     found_tracker_match: bool | None = None
     frame_info_map: dict[str, Any] = field(default_factory=dict)
     frame_overlay: bool = False
+    force_tonemap: bool = False
     frame_rate: float | None = None
     framestor: bool | None = None
     freeleech: int = 0
     freeleech_until: int = 0
     game_region: str = ""
+    game_age_ratings: dict[str, str] = field(default_factory=dict)
+    game_aliases: list[str] = field(default_factory=list)
+    game_composers: list[str] = field(default_factory=list)
+    game_designers: list[str] = field(default_factory=list)
+    game_engines: list[str] = field(default_factory=list)
+    game_features: list[str] = field(default_factory=list)
+    game_franchises: list[str] = field(default_factory=list)
+    game_modes: list[str] = field(default_factory=list)
+    game_multiplayer_modes: dict[str, list[str]] = field(default_factory=dict)
+    game_official_url: str = ""
+    game_parent_title: str = ""
+    game_player_perspectives: list[str] = field(default_factory=list)
+    game_ratings: dict[str, dict[str, Any]] = field(default_factory=dict)
+    game_release_dates: list[dict[str, str]] = field(default_factory=list)
+    game_release_edition: str = ""
+    game_release_edition_year: int | None = None
+    game_release_notes: str = ""
+    game_release_scene: bool | None = None
+    game_release_title: str = ""
+    game_release_type: str = ""
     game_subcategory: str = ""
     game_system: str = ""
+    game_status: str = ""
+    game_title: str | None = None
+    game_developer: str | None = None
+    game_themes: list[str] = field(default_factory=list)
+    game_time_to_beat: dict[str, int] = field(default_factory=dict)
+    game_type: str = ""
     game_version: str = ""
     genre_ids: int | None = None
     genre: str = ""
     genres: list[str] = field(default_factory=list)
+    manual_genres: str | None = None
+    manual_overview: str | None = None
     hardcoded_subs: bool = False
     hardcoded_subs_language: str | None = None
     has_commentary: bool = False
@@ -204,9 +240,11 @@ class Meta:
     igdb_manual: str | None = None
     igdb_rating_count: int | str = ""
     igdb_rating: float | str = ""
+    igdb_url: str | None = None
     image_list: list[dict[str, Any]] = field(default_factory=list)
     image_sizes: dict[str, Any] = field(default_factory=dict)
     imdb_id: int | None = None
+    tmdb_imdb_id: int = 0
     imdb_info: dict[str, Any] = field(default_factory=dict)
     imdb_manual: str | int | None = None
     imdb_mismatch: bool = False
@@ -218,6 +256,7 @@ class Meta:
     infohash: str = ""
     initial_dupes: dict[str, Any] = field(default_factory=dict)
     is_disc: str = ""
+    is_sports: bool = False
     pre_release: bool = False
     isbn: str = ""
     isdir: bool = False
@@ -299,6 +338,7 @@ class Meta:
     no_edition: bool = False
     no_ids: bool = False
     no_imdb: bool = False
+    automatic_imdb_rejected: bool = False
     no_override: bool = False
     no_season: bool = False
     no_seed: bool = False
@@ -310,6 +350,11 @@ class Meta:
     non_disc_has_pcm_audio_tracks: bool = False
     not_anime: bool = False
     nzb_path: str = ""
+    usenet_nzb_paths: list[str] = field(default_factory=list)
+    usenet_pack_nzb_path: str | None = None
+    usenet_is_pack: bool = False
+    usenet_is_episode_submission: bool = False
+    usenet_media_source: str | None = None
     ocr: bool | None = None
     only_id: bool | None = None
     openlibrary_book_id: int | None = None
@@ -362,6 +407,8 @@ class Meta:
     release_date: str = ""
     release_dates: dict[str, Any] | None = None
     release_url: str = ""
+    release_subheader: str = ""
+    release_subheader_url: str = ""
     remove_trackers: list[str] | bool = False
     repack: str = ""
     requested_trackers: list[str] | None = None
@@ -373,6 +420,7 @@ class Meta:
     retrieved_aka: str | None = None
     retry_count: int = 0
     reuse_torrent_client: str | None = None
+    reuse_torrent_infohash: str | None = None
     reuse_torrent_path: str | None = None
     rtorrent_label: str | None = None
     runtime: int = 60
@@ -403,6 +451,7 @@ class Meta:
     season_pack_contains_episode: bool | None = None
     season_pack_exists: bool = False
     season_pack_id: int | str | None = None
+    season_pack_incomplete: bool = False
     season_pack_link: str | None = None
     season_pack_name: str = ""
     season: int | str | None = 0
@@ -502,6 +551,7 @@ class Meta:
     uploader_comments: str = ""
     use_bluray_images: bool = False
     usenet_archive_password_is_random: bool | None = None
+    usenet_episodes_only: list[str] = field(default_factory=list)
     usenet_subject: str | None = None
     usenet: bool = False
     uuid: str = ""
@@ -620,6 +670,11 @@ class Meta:
         else:
             for k, v in other.items():
                 setattr(self, k, v)
+
+    @staticmethod
+    def tracker_name_aliases() -> dict[str, str]:
+        """Expose the built-in tracker names accepted by runtime selection."""
+        return dict(_TRACKER_ID_ALIASES)
 
     @staticmethod
     def canonical_tracker_name(tracker_name: str) -> str:

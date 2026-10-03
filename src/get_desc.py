@@ -9,15 +9,18 @@ import urllib.parse
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, cast
-from urllib.parse import ParseResult
+from urllib.parse import ParseResult, urlsplit
 
 import aiofiles
 import httpx
 import langcodes
+from bs4 import BeautifulSoup, Comment, NavigableString, Tag
 from jinja2 import Template
 from langcodes.tag_parser import LanguageTagError
 
+from src.audible import build_audible_author_url, resolve_audible_url
 from src.bbcode import BBCODE
+from src.bluray_com import ensure_release_subheader
 from src.cogs.redaction import PathAwareEncoder
 from src.console import logger
 from src.description_languages import COMMON_LABELS, GAME_LABELS, MUSIC_LABELS, get_book_labels, get_labels
@@ -27,7 +30,7 @@ from src.mediainfo import MediaInfo
 from src.meta import Meta
 from src.screenshot_manifest import files as manifest_files
 from src.takescreens import TakeScreensManager
-from src.tracker_images import get_tracker_image_collection
+from src.tracker_images import get_tracker_image_collection, has_tracker_image_collection
 from src.trackers.common import Common
 from src.uploadscreens import UploadScreensManager
 
@@ -67,6 +70,132 @@ def html_to_bbcode(text: str) -> str:
 
     # Strip any residual HTML tags
     return re.sub(r"<[^>]+>", "", converted_text)
+
+
+def _clean_game_requirements(value: str) -> str:
+    """Convert a Steam requirements block to clean BBCode."""
+    cleaned = html.unescape(html_to_bbcode(value))
+    cleaned = re.sub(r"<[^>]+>", "", cleaned).strip()
+    return re.sub(
+        r"^\[b\](?:Minimum|Recommended|Mínimo|Mínimos|Recomendado|Recomendados):?\[/b\]\s*",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+
+
+def _parse_game_requirement_items(value: str) -> list[tuple[str, str, str]]:
+    """Return normalized key, display label, and value for each Steam requirement."""
+    cleaned = _clean_game_requirements(value)
+    if not cleaned:
+        return []
+
+    items: list[list[str]] = []
+    unlabeled_count = 0
+    label_counts: dict[str, int] = {}
+    item_pattern = re.compile(r"^\[b\](?P<label>.+?)(?::\s*)?\[/b\]\s*:?[ \t]*(?P<value>.*)$", re.IGNORECASE)
+
+    for raw_line in cleaned.splitlines():
+        is_list_item = bool(re.match(r"^\s*\*\s*", raw_line))
+        line = re.sub(r"^\s*\*\s*", "", raw_line).strip()
+        if not line:
+            continue
+        match = item_pattern.match(line)
+        if match:
+            label = _safe_game_field(match.group("label").rstrip(":").replace("*", "")).strip()
+            item_value = match.group("value").strip()
+            base_key = label.casefold()
+            occurrence = label_counts.get(base_key, 0)
+            label_counts[base_key] = occurrence + 1
+            key = f"label:{base_key}:{occurrence}"
+            items.append([key, label or "-", item_value or "-"])
+        elif is_list_item or not items:
+            items.append([f"unlabeled:{unlabeled_count}", "-", line])
+            unlabeled_count += 1
+        else:
+            items[-1][2] = f"{items[-1][2]}\n{line}"
+
+    if not items:
+        return [("details", "-", cleaned)]
+    return [(key, label, item_value) for key, label, item_value in items]
+
+
+def _safe_game_field(value: Any) -> str:
+    text = re.sub(r"<[^>]+>", "", html.unescape(str(value or ""))).strip()
+    return " ".join(text.replace("[", "").replace("]", "").split())
+
+
+def _clean_description_text(value: Any) -> str:
+    """Remove serialization escapes that may be returned in synopsis text."""
+    text = str(value or "").strip()
+
+    # Some providers return the complete synopsis as a JSON string literal.
+    if len(text) >= 2 and text[0] == text[-1] == '"':
+        try:
+            decoded = json.loads(text)
+        except json.JSONDecodeError, TypeError:
+            pass
+        else:
+            if isinstance(decoded, str):
+                text = decoded.strip()
+
+    text = html.unescape(text)
+
+    # Handle partially escaped payloads as well (for example, ``\\"text\\"``).
+    return text.replace(r"\"", '"').replace(r"\/", "/")
+
+
+def _book_overview_to_bbcode(value: str) -> str:
+    """Preserve useful HTML formatting in book synopses from any source."""
+    soup = BeautifulSoup(_clean_description_text(value), "html.parser")
+
+    def render(node: Any) -> str:
+        if isinstance(node, Comment):
+            return ""
+        if isinstance(node, NavigableString):
+            return str(node)
+        if not isinstance(node, Tag) or node.name in {"script", "style", "template", "img"}:
+            return ""
+        if node.name == "br":
+            return "\n"
+        content = "".join(render(child) for child in node.children)
+        inline_tags = {"b": "b", "strong": "b", "i": "i", "em": "i", "u": "u", "s": "s", "strike": "s", "del": "s"}
+        if node.name in inline_tags and content.strip():
+            tag = inline_tags[node.name]
+            return f"[{tag}]{content}[/{tag}]"
+        if node.name == "a":
+            href = _safe_game_url(node.get("href"))
+            return f"[url={href}]{content}[/url]" if href and content.strip() else content
+        if node.name == "li":
+            return f"* {content.strip()}\n"
+        if node.name in {"p", "div", "ul", "ol"}:
+            return f"{content.strip()}\n\n"
+        if node.name in {"h1", "h2", "h3", "h4", "h5", "h6"} and content.strip():
+            return f"[b]{content.strip()}[/b]\n\n"
+        if node.name == "blockquote" and content.strip():
+            return f"[quote]{content.strip()}[/quote]\n\n"
+        return content
+
+    converted = "".join(render(child) for child in soup.contents)
+    return re.sub(r"\n{3,}", "\n\n", converted).strip()
+
+
+def _safe_game_url(value: Any) -> str:
+    url = str(value or "").strip()
+    parsed = urllib.parse.urlparse(url)
+    return url if parsed.scheme in {"http", "https"} and parsed.netloc and not any(char in url for char in "[]\r\n") else ""
+
+
+def _format_game_duration(seconds: Any) -> str:
+    if not isinstance(seconds, int) or seconds <= 0:
+        return ""
+    hours, remainder = divmod(seconds, 3600)
+    minutes = remainder // 60
+    if hours and minutes:
+        return f"{hours}h {minutes}m"
+    if hours:
+        return f"{hours}h"
+    return f"{minutes}m"
 
 
 async def gen_desc(
@@ -401,6 +530,8 @@ class DescriptionBuilder:
                 episode_tmdb_data = meta.episode_tmdb_data
                 title = episode_tmdb_data.get("name", "")
                 overview = episode_tmdb_data.get("overview", "")
+                if overview:
+                    overview = _clean_description_text(html_to_bbcode(str(overview)))
                 return title, overview
 
             tvmaze_episode_data = meta.tvmaze_episode_data
@@ -413,6 +544,7 @@ class DescriptionBuilder:
             # Convert HTML tags to BBCode
             if overview:
                 overview = html_to_bbcode(overview)
+                overview = _clean_description_text(overview)
 
             episode_name = tvmaze_episode_data.get("episode_name", "")
             episode_title = meta.auto_episode_title or (episode_name if (not episode_name.lower().startswith("episode") and "tba" not in episode_name.lower()) else "")
@@ -645,6 +777,17 @@ class DescriptionBuilder:
 
         return custom_signature
 
+    def format_bluray_link(self, url: str, label: str) -> str:
+        if self.tracker == "IMMORTALSEED":
+            return f"{label} — {url}" if label else url
+        if self.tracker == "TORRENTLEECH":
+            return f'<a href="{html.escape(url, quote=True)}">{html.escape(label)}</a>' if label else url
+        if not label:
+            return f"[url]{url}[/url]"
+        # The subheader is text, not tracker BBCode.
+        safe_label = label.replace("[", "&#91;").replace("]", "&#93;")
+        return f"[url={url}]{safe_label}[/url]"
+
     async def get_bluray_section(self, meta: Meta) -> tuple[str, str]:
         release_url: str = ""
         cover_list: list[str] = []
@@ -656,6 +799,7 @@ class DescriptionBuilder:
 
             if meta.is_disc in ["BDMV", "DVD"] and bluray_link and meta.release_url:
                 release_url = meta.release_url
+                await ensure_release_subheader(meta)
 
             cover_data = meta.hosted_artwork
             if not cover_data and await self.common.path_exists(f"{meta.base_dir}{'/' + 'tmp' + '/'}{meta.uuid}/covers.json"):
@@ -737,19 +881,13 @@ class DescriptionBuilder:
         desc_parts.append("[/center]\n")
         return "".join(desc_parts)
 
-    def _build_book_desc_section(self, meta: Meta, header_size: int = 0, table: bool = True, underline: bool = False, bullet: str = "") -> str:
+    def _build_book_desc_section(self, meta: Meta, table: bool = True, underline: bool = False, bullet: str = "") -> str:
         """Build the BBCode table or list for BOOK-category uploads."""
         if self.tracker in ("TORRENTLEECH", "IMMORTALSEED", "IPTORRENTS", "SPEEDAPP"):
             table = False
-            header_size = -1
-        elif self.tracker in ("BJSHARE", "BRASILTRACKER", "AMIGOSSHARE"):
-            if not header_size:
-                header_size = 3
-            if self.tracker == "AMIGOSSHARE":
-                table = False
 
-        header = "[h2]" if not header_size else f"[size={header_size}][b]"
-        header_end = "[/h2]" if not header_size else "[/b][/size]\n"
+        header = "[h2]"
+        header_end = "[/h2]"
 
         asin = meta.asin
         author = meta.author
@@ -772,27 +910,59 @@ class DescriptionBuilder:
         str_narrator = labels["narrator"]
         str_overview = labels["overview"]
         str_publisher = labels["publisher"]
+        str_service = labels["service"]
         str_technical_details = labels["technical_details"]
         str_year = labels["year"]
 
         if overview:
-            overview = html_to_bbcode(overview)
-            overview = re.sub(r"<[^>]+>", "", overview).strip()
+            overview = _book_overview_to_bbcode(overview)
+
+        audible_url = ""
+        if asin:
+            with contextlib.suppress(ValueError):
+                audible_url = resolve_audible_url(
+                    asin,
+                    explicit_url=meta.audible_url,
+                    domain=self.config.get("DEFAULT", {}).get("audible_domain", ""),
+                )
 
         # Collect key-value pairs
         fields: list[tuple[str, str]] = []
         if author:
-            fields.append((str_author, author))
+            author_display = author
+            audible_authors = meta.audible_authors
+            author_names = [item["name"] for item in audible_authors if item.get("name")]
+            if meta.audiobook and audible_url and author_names and author in (author_names[0], ", ".join(author_names)):
+                try:
+                    domain = (urlsplit(audible_url).hostname or "").removeprefix("www.")
+                    author_display = ", ".join(
+                        f"[url={build_audible_author_url(item['asin'], domain)}]{item['name']}[/url]" if item.get("asin") else item["name"] for item in audible_authors
+                    )
+                except ValueError, KeyError:
+                    pass
+            fields.append((str_author, author_display))
         if book_translator:
             fields.append((str_book_translator, book_translator))
         if narrator:
             fields.append((str_narrator, narrator))
         if publisher:
             fields.append((str_publisher, publisher))
+        service = meta.service_longname or meta.service
+        if service:
+            fields.append((str_service, service))
         if isbn:
             fields.append((str_isbn, isbn))
         if asin:
-            fields.append((str_asin, asin))
+            asin_display = asin
+            if audible_url:
+                asin_display = f"[url={audible_url}]{asin}[/url]"
+            fields.append((str_asin, asin_display))
+        if meta.audiobook and meta.audible_rating_average is not None and meta.audible_rating_count:
+            score = f"{meta.audible_rating_average:.1f}"
+            if self.language == "pt-BR":
+                score = score.replace(".", ",")
+            rating_display = f"{score}/5 ({meta.audible_rating_count} {labels['audible_ratings']})"
+            fields.append((labels["audible_rating"], rating_display))
         if edition:
             fields.append((str_edition, edition))
         if year:
@@ -813,9 +983,6 @@ class DescriptionBuilder:
             if underline:
                 header = "[b][u]"
                 header_end = "[/u][/b]\n"
-            elif header_size == -1:
-                header = "[b]"
-                header_end = "[/b]\n"
 
             if fields:
                 final_book_parts.append(f"{header}{str_technical_details}{header_end}")
@@ -841,12 +1008,9 @@ class DescriptionBuilder:
         if underline:
             header = "[b][u]"
             header_end = "[/u][/b]\n"
-        elif header_size == -1:
-            header = "[b]"
-            header_end = "[/b]\n"
         else:
-            header = "[h2]" if not header_size else f"[size={header_size}][b]"
-            header_end = "[/h2]" if not header_size else "[/b][/size]\n"
+            header = "[h2]"
+            header_end = "[/h2]"
 
         if book_parts:
             final_book_parts.append(f"{header}{str_technical_details}{header_end}" + "\n".join(book_parts))
@@ -856,20 +1020,15 @@ class DescriptionBuilder:
 
         return "\n\n".join(final_book_parts)
 
-    def _build_game_desc_section(self, meta: Meta, header_size: int = 0, table: bool = True) -> str:
+    def _build_game_desc_section(self, meta: Meta, table: bool = True) -> str:
         """Build the beautiful BBCode layout for GAME-category uploads."""
         if meta.category != "GAME":
             return ""
 
         game_parts: list[str] = []
 
-        if self.tracker == "TORRENTLEECH" and not header_size:
-            header_size = 1
-        elif self.tracker in ("BJSHARE", "BRASILTRACKER") and not header_size:
-            header_size = 3
-
-        header = "[h2]" if not header_size else f"[size={header_size}][b]"
-        header_end = "[/h2]" if not header_size else "[/b][/size]\n"
+        header = "[h2]"
+        header_end = "[/h2]"
 
         use_pt_br = self.language == "pt-BR"
         str_technical_details = "Technical Details" if not use_pt_br else "Detalhes Técnicos"
@@ -900,34 +1059,81 @@ class DescriptionBuilder:
         str_language = game_labels["language"]
         str_support = game_labels["support"]
 
+        def append_rows_section(title: str, rows: list[tuple[str, str]]) -> None:
+            rows = [(label, value) for label, value in rows if value]
+            if not rows:
+                return
+            lines = [f"{header}{title}{header_end}"]
+            if table:
+                table_lines = ["[table]"]
+                table_lines.extend(f"[tr][td][b]{label}[/b][/td][td]{value}[/td][/tr]" for label, value in rows)
+                table_lines.append("[/table]")
+                lines.append("\n".join(table_lines))
+            else:
+                lines.extend(f"[b]{label}[/b] {value}" for label, value in rows)
+            game_parts.append("\n".join(lines))
+
         # 1. Technical Details
         fields: list[tuple[str, str]] = []
         if meta.platform:
-            fields.append((str_platform, meta.platform))
+            fields.append((str_platform, _safe_game_field(meta.platform)))
+        release_date = meta.igdb_first_release_date or meta.year
+        if release_date:
+            fields.append((game_labels["release_date"], _safe_game_field(release_date)))
         if meta.game_version:
-            fields.append((str_version, meta.game_version))
+            fields.append((str_version, _safe_game_field(meta.game_version)))
+        if meta.game_region:
+            fields.append((game_labels["region"], _safe_game_field(meta.game_region)))
+        if meta.game_release_edition:
+            edition = _safe_game_field(meta.game_release_edition)
+            if meta.game_release_edition_year:
+                edition = f"{edition} ({meta.game_release_edition_year})"
+            fields.append((game_labels["edition"], edition))
+        if meta.game_release_type:
+            fields.append((game_labels["release_type"], _safe_game_field(meta.game_release_type)))
+        if meta.game_release_title:
+            fields.append((game_labels["release_title"], _safe_game_field(meta.game_release_title)))
+        if meta.game_release_scene is not None:
+            fields.append((game_labels["scene_release"], game_labels["yes"] if meta.game_release_scene else game_labels["no"]))
+        if meta.game_parent_title:
+            fields.append((game_labels["parent_game"], _safe_game_field(meta.game_parent_title)))
+        if meta.game_type:
+            fields.append((game_labels["game_type"], _safe_game_field(meta.game_type)))
+        if meta.game_status:
+            fields.append((game_labels["status"], _safe_game_field(meta.game_status)))
         if meta.genres:
-            fields.append((str_genre, ", ".join(meta.genres)))
+            fields.append((str_genre, ", ".join(_safe_game_field(value) for value in meta.genres)))
+        if meta.game_age_ratings:
+            fields.append((game_labels["age_rating"], ", ".join(f"{_safe_game_field(source)}: {_safe_game_field(rating)}" for source, rating in meta.game_age_ratings.items())))
+        for label, values in (
+            (game_labels["franchise"], meta.game_franchises),
+            (game_labels["engine"], meta.game_engines),
+            (game_labels["game_modes"], meta.game_modes),
+            (game_labels["perspectives"], meta.game_player_perspectives),
+            (game_labels["themes"], meta.game_themes),
+            (game_labels["features"], meta.game_features),
+        ):
+            if values:
+                fields.append((label, ", ".join(_safe_game_field(value) for value in values)))
         if meta.developer:
-            fields.append((str_developer, meta.developer))
+            fields.append((str_developer, _safe_game_field(meta.developer)))
         if meta.publisher:
-            fields.append((str_publisher, meta.publisher))
-        if meta.steam_url:
-            fields.append(("Steam", f"[url]{meta.steam_url}[/url]"))
+            fields.append((str_publisher, _safe_game_field(meta.publisher)))
+        if meta.game_designers:
+            fields.append((game_labels["designers"], ", ".join(_safe_game_field(value) for value in meta.game_designers)))
+        if meta.game_composers:
+            fields.append((game_labels["composers"], ", ".join(_safe_game_field(value) for value in meta.game_composers)))
+        steam_url = _safe_game_url(meta.steam_url)
+        if steam_url:
+            fields.append(("Steam", f"[url={steam_url}]Steam[/url]"))
+        official_url = _safe_game_url(meta.game_official_url)
+        if official_url:
+            fields.append((game_labels["official_site"], f"[url={official_url}]{game_labels['official_site']}[/url]"))
+        trailer_url = _safe_game_url(meta.youtube)
+        if trailer_url:
+            fields.append((game_labels["trailer"], f"[url={trailer_url}]{game_labels['trailer']}[/url]"))
 
-        if fields:
-            details_lines = []
-            details_lines.append(f"{header}{str_technical_details}{header_end}")
-            if table:
-                table_lines = ["[table]"]
-                for label, val in fields:
-                    table_lines.append(f"[tr][td][b]{label}[/b][/td][td]{val}[/td][/tr]")
-                table_lines.append("[/table]")
-                details_lines.append("\n".join(table_lines))
-            else:
-                for label, val in fields:
-                    details_lines.append(f"[b]{label}[/b] {val}")
-            game_parts.append("\n".join(details_lines))
+        append_rows_section(str_technical_details, fields)
 
         # 2. Overview Section
         overview_text = ""
@@ -939,6 +1145,7 @@ class DescriptionBuilder:
         if overview:
             overview = html_to_bbcode(str(overview))
             overview = re.sub(r"<[^>]+>", "", overview).strip()
+            overview = _clean_description_text(overview)
 
         if overview:
             overview_text = f"\n{header}{str_overview}{header_end}\n{overview}\n"
@@ -946,40 +1153,71 @@ class DescriptionBuilder:
         if overview_text:
             game_parts.append(overview_text)
 
+        rating_rows: list[tuple[str, str]] = []
+        if isinstance(meta.game_ratings, dict):
+            for source, rating in meta.game_ratings.items():
+                if not isinstance(rating, dict):
+                    continue
+                score = rating.get("score")
+                maximum = rating.get("max")
+                if isinstance(score, bool) or isinstance(maximum, bool) or not isinstance(score, (int, float)) or not isinstance(maximum, (int, float)) or maximum <= 0:
+                    continue
+                value = f"{score:g}/{maximum:g}"
+                count = rating.get("count")
+                if isinstance(count, int) and count >= 0:
+                    value += f" ({count:,} {game_labels['votes'].lower()})"
+                url = _safe_game_url(rating.get("url"))
+                if url:
+                    value = f"[url={url}]{value}[/url]"
+                rating_rows.append((_safe_game_field(source), value))
+        append_rows_section(game_labels["ratings"], rating_rows)
+
+        multiplayer_rows = []
+        if isinstance(meta.game_multiplayer_modes, dict):
+            multiplayer_rows = [
+                (_safe_game_field(platform), ", ".join(_safe_game_field(capability) for capability in capabilities))
+                for platform, capabilities in meta.game_multiplayer_modes.items()
+                if isinstance(capabilities, list) and capabilities
+            ]
+        append_rows_section(game_labels["multiplayer"], multiplayer_rows)
+
+        time_rows = []
+        if isinstance(meta.game_time_to_beat, dict):
+            time_rows = [
+                (game_labels[label], _format_game_duration(meta.game_time_to_beat.get(key)))
+                for key, label in (("hastily", "main_story"), ("normally", "main_extras"), ("completely", "completionist"))
+            ]
+        append_rows_section(game_labels["time_to_beat"], time_rows)
+
         # 3. System Requirements Section
         req_min = meta.requirements_minimum
         req_rec = meta.requirements_recommended
 
         if req_min or req_rec:
-            import html
-
             header_title = f"{str_system_requirements}"
             game_parts.append(f"{header}{header_title}{header_end}")
 
             col_min_header = f"{str_minimum}"
             col_rec_header = f"{str_recommended}"
 
-            clean_min = ""
-            if req_min:
-                clean_min = html_to_bbcode(req_min)
-                clean_min = html.unescape(clean_min)
-                clean_min = re.sub(r"<[^>]+>", "", clean_min).strip()
-                clean_min = re.sub(r"^\[b\](Minimum|Mínimo):\[/b\]\s*", "", clean_min, flags=re.IGNORECASE)
-
-            clean_rec = ""
-            if req_rec:
-                clean_rec = html_to_bbcode(req_rec)
-                clean_rec = html.unescape(clean_rec)
-                clean_rec = re.sub(r"<[^>]+>", "", clean_rec).strip()
-                clean_rec = re.sub(r"^\[b\](Recommended|Recomendado):\[/b\]\s*", "", clean_rec, flags=re.IGNORECASE)
+            clean_min = _clean_game_requirements(req_min) if req_min else ""
+            clean_rec = _clean_game_requirements(req_rec) if req_rec else ""
 
             if table:
-                clean_min = clean_min or "-"
-                clean_rec = clean_rec or "-"
+                min_items = _parse_game_requirement_items(req_min) if req_min else []
+                rec_items = _parse_game_requirement_items(req_rec) if req_rec else []
+                min_by_key = {key: (label, value) for key, label, value in min_items}
+                rec_by_key = {key: (label, value) for key, label, value in rec_items}
+                row_keys = list(min_by_key)
+                row_keys.extend(key for key in rec_by_key if key not in min_by_key)
 
                 table_lines = ["[table]"]
-                table_lines.append(f"[tr][td][b]{col_min_header}[/b][/td][td][b]{col_rec_header}[/b][/td][/tr]")
-                table_lines.append(f"[tr][td]{clean_min}[/td][td]{clean_rec}[/td][/tr]")
+                table_lines.append(f"[tr][td][b]{game_labels['hardware']}[/b][/td][td][b]{col_min_header}[/b][/td][td][b]{col_rec_header}[/b][/td][/tr]")
+                for key in row_keys:
+                    min_label, min_value = min_by_key.get(key, ("", "-"))
+                    rec_label, rec_value = rec_by_key.get(key, ("", "-"))
+                    label = min_label or rec_label or "-"
+                    table_lines.append(f"[tr][td][b]{label}[/b][/td][td]{min_value}[/td][td]{rec_value}[/td][/tr]")
                 table_lines.append("[/table]")
                 game_parts.append("\n".join(table_lines))
             else:
@@ -994,13 +1232,19 @@ class DescriptionBuilder:
         # 4. Supported Languages
         languages = meta.languages
         if languages and isinstance(languages, dict):
+            support_labels = game_labels["language_support_types"]
+
+            def localized_support(support: Any) -> str:
+                cleaned_support = _safe_game_field(support)
+                return support_labels.get(cleaned_support.casefold(), cleaned_support)
+
             if table:
                 table_rows = []
                 table_rows.append(f"[tr][td][b]{str_language}[/b][/td][td][b]{str_support}[/b][/td][/tr]")
 
                 for lang, support in sorted(languages.items()):
                     lang = (lang or "").strip() or "-"
-                    support_str = ", ".join(support).strip() or "-"
+                    support_str = ", ".join(localized_support(value) for value in support).strip() or "-"
 
                     table_rows.append(f"[tr][td]{lang}[/td][td]{support_str}[/td][/tr]")
 
@@ -1011,14 +1255,72 @@ class DescriptionBuilder:
                 # Simple BBCode format without table
                 simple_lang_lines = []
                 for lang, support in sorted(languages.items()):
-                    support_str = ", ".join(support)
+                    support_str = ", ".join(localized_support(value) for value in support)
                     simple_lang_lines.append(f"[b]{lang}[/b]: {support_str}")
                 simple_section = f"{header}{str_official_supported_languages}{header_end}\n" + "\n".join(simple_lang_lines) + "\n"
                 game_parts.append(simple_section)
 
         return "\n".join(part for part in game_parts if part.strip())
 
-    def _build_music_desc_section(self, meta: Meta, header_size: int = 0, table: bool = True) -> str:
+    @staticmethod
+    def _build_music_tracklist(tracks: list[Any], labels: dict[str, Any], table: bool = True) -> str:
+        """Render the audio files in disc/track order from the release snapshot."""
+
+        def positive_number(value: Any) -> int | None:
+            try:
+                number = int(value)
+            except TypeError, ValueError, OverflowError:
+                return None
+            return number if number > 0 else None
+
+        ordered = []
+        for index, track in enumerate(tracks):
+            if not isinstance(track, dict):
+                continue
+            relative_path = str(track.get("relative_path") or "")
+            title = str(track.get("title") or "").strip() or Path(relative_path.replace("\\", "/")).stem
+            if not title:
+                continue
+            disc = positive_number(track.get("disc_number")) or 1
+            number = positive_number(track.get("track_number"))
+            ordered.append((disc, number, relative_path.casefold(), index, title, track.get("duration")))
+
+        if not ordered:
+            return ""
+        ordered.sort(key=lambda item: (item[0], item[1] if item[1] is not None else float("inf"), item[2], item[3]))
+        multiple_discs = len({item[0] for item in ordered}) > 1
+        lines = [f"[h2]{labels['tracklist']}[/h2]"]
+        if table:
+            lines.extend(
+                [
+                    "[table]",
+                    f"[tr][td][b]{labels['track_number']}[/b][/td][td][b]{labels['title']}[/b][/td][td][b]{labels['duration']}[/b][/td][/tr]",
+                ]
+            )
+        for disc, number, _, _, title, duration in ordered:
+            # BBCode needs bracket protection, but HTML escaping turns apostrophes
+            # and ampersands into visible entities on some trackers.
+            safe_title = title.replace("[", "\uff3b").replace("]", "\uff3d").replace("<", "\u2039").replace(">", "\u203a")
+            try:
+                seconds = float(duration)
+            except TypeError, ValueError, OverflowError:
+                seconds = 0
+            duration_text = ""
+            if 0 < seconds < float("inf"):
+                minutes, remainder = divmod(round(seconds), 60)
+                duration_text = f"{minutes:02d}:{remainder:02d}"
+            track_number = f"{number:02d}" if number is not None else "—"
+            if multiple_discs:
+                track_number = f"{disc}.{track_number}"
+            if table:
+                lines.append(f"[tr][td]{track_number}[/td][td]{safe_title}[/td][td]{duration_text}[/td][/tr]")
+            else:
+                lines.append(f"{track_number}. {safe_title}" + (f" ({duration_text})" if duration_text else ""))
+        if table:
+            lines.append("[/table]")
+        return "\n".join(lines)
+
+    def _build_music_desc_section(self, meta: Meta, table: bool = True) -> str:
         """Build a tracker-neutral BBCode summary for MUSIC-category uploads."""
         if meta.category != "MUSIC" or not isinstance(meta.music_release, dict):
             return ""
@@ -1039,13 +1341,8 @@ class DescriptionBuilder:
         if not fields_data and not tracks and not external_ids:
             return ""
 
-        if self.tracker == "TORRENTLEECH" and not header_size:
-            header_size = 1
-        elif self.tracker in ("BJSHARE", "BRASILTRACKER", "SPEEDAPP") and not header_size:
-            header_size = 3
-
-        header = "[h2]" if not header_size else f"[size={header_size}][b]"
-        header_end = "[/h2]" if not header_size else "[/b][/size]\n"
+        header = "[h2]"
+        header_end = "[/h2]"
         use_pt_br = self.language == "pt-BR"
 
         def value(name: str, fallback: Any = "") -> Any:
@@ -1164,7 +1461,8 @@ class DescriptionBuilder:
             body = "\n".join(table_lines)
         else:
             body = "\n".join(f"[b]{label}:[/b] {field_value}" for label, field_value in music_fields)
-        return f"{header}{text['details']}{header_end}\n{body}"
+        tracklist = self._build_music_tracklist(tracks, text, table=table)
+        return f"{header}{text['details']}{header_end}\n{body}" + (f"\n\n{tracklist}" if tracklist else "")
 
     async def general_description_generator(
         self,
@@ -1185,12 +1483,12 @@ class DescriptionBuilder:
         screenshots: bool = True,
         tonemapped_header: bool = True,
         tv_info: bool = True,
-        ua_signature: bool = True,
+        ua_signature: bool = True,  # ci: ua_signature v4.5
         user_description: bool = True,
         music: bool = True,
         dynamic_hdr_plot: bool = True,
         approved_image_hosts: list[str] | None = None,
-        signature: str = "",
+        signature: str = "",  # ci: ua_signature v4.5
         desc_header: str = "",
     ) -> str:
         apply_saved_draft(meta)
@@ -1201,12 +1499,11 @@ class DescriptionBuilder:
             image_list = []
         if approved_image_hosts is None:
             approved_image_hosts = []
-        if image_list:
-            images = image_list
-            multi_screens = 0
-        else:
-            images = meta.image_list
-            multi_screens = self._get_int_config("multiScreens", 2)
+        # get_tracker_image_collection falls back to meta.image_list, so only a real override
+        # replaces the base screenshots. It never disables per-file pack screenshots: those
+        # upload through allowed_hosts, so a tracker's host policy is honoured either way.
+        images = image_list if image_list and has_tracker_image_collection(meta, self.tracker, "screenshots") else meta.image_list
+        multi_screens = self._get_int_config("multiScreens", 2)
         if meta.sorted_filelist:
             multi_screens = 0
 
@@ -1288,7 +1585,8 @@ class DescriptionBuilder:
         if bluray:
             release_url, cover_images = await self.get_bluray_section(meta)
             if release_url:
-                desc_parts.append(f"[center]{release_url}[/center]")
+                label = meta.release_subheader if meta.release_subheader_url == release_url else ""
+                desc_parts.append(f"[center]{self.format_bluray_link(release_url, label)}[/center]")
             if cover_images:
                 desc_parts.append(f"[center]{cover_images}[/center]\n")
 
@@ -1402,50 +1700,53 @@ class DescriptionBuilder:
             if not description or user_description_content.strip() != meta_description.strip():
                 desc_parts.append(user_description_content)
 
+        # Render the remaining optional sections before deciding whether a
+        # standalone screenshot section needs its heading.
+        menu_section = await self.menu_section(meta) if menu_screenshots else ""
+        tonemapped_section = tonemapped_header_text if tonemapped_header else ""
+        audio_spectrogram_section = await self.get_audio_spectrogram_section(meta) if audio_spectrogram else ""
+        dynamic_hdr_plot_section = await self.get_dynamic_hdr_plot_section(meta) if dynamic_hdr_plot else ""
+        custom_signature_section = await self.get_custom_signature(meta) if custom_signature else ""
+
+        # Signatures are footers, not content sections. Ignoring them here lets
+        # the standalone-header setting work in normal runs, where UA always
+        # supplies ``meta.ua_signature``.
+        other_sections = [*desc_parts, menu_section, tonemapped_section, audio_spectrogram_section, dynamic_hdr_plot_section]
+        include_screenshot_header = not (self._get_bool_config("hide_screenshot_header_if_only_section", True) and not any(part.strip() for part in other_sections))
+
         # Menu Screenshots
-        if menu_screenshots:
-            desc_parts.append(await self.menu_section(meta))
+        desc_parts.append(menu_section)
 
         # Tonemapped Header
-        if tonemapped_header:
-            desc_parts.append(tonemapped_header_text)
+        desc_parts.append(tonemapped_section)
 
         # Discs and Screenshots
         if screenshots:
-            discs_and_screenshots = await self._handle_discs_and_screenshots(meta, approved_image_hosts, images, multi_screens)
+            discs_and_screenshots = await self._handle_discs_and_screenshots(meta, approved_image_hosts, images, multi_screens, include_screenshot_header)
             desc_parts.append(discs_and_screenshots)
 
         # Audio Spectrograms
-        if audio_spectrogram:
-            desc_parts.append(await self.get_audio_spectrogram_section(meta))
+        desc_parts.append(audio_spectrogram_section)
 
         # Dynamic HDR metadata plots (Dolby Vision / HDR10+)
         if dynamic_hdr_plot:
-            desc_parts.append(await self.get_dynamic_hdr_plot_section(meta))
+            desc_parts.append(dynamic_hdr_plot_section)
 
         # Custom Signature
         if custom_signature:
-            desc_parts.append(await self.get_custom_signature(meta))
-
-        # UA Signature
-        if ua_signature:
-            if not signature:
-                script_signature = meta.ua_signature
-                signature = f"[right][url=https://github.com/wastaken7/Upload-Assistant][size=4]{script_signature}[/size][/url][/right]"
-            desc_parts.append(signature)
+            desc_parts.append(custom_signature_section)
 
         description_str: str = "\n".join(part for part in desc_parts if part.strip())
-
-        # Formatting
-        description_str = self.tracker_specific_formats(self.tracker, description_str)
 
         if meta.debug:
             desc_file = f"{meta.base_dir}{'/' + 'tmp' + '/'}{meta.uuid}/[{self.tracker}]DESCRIPTION.txt"
             logger.debug(f"DEBUG: Saving final description to [yellow]{desc_file}[/yellow]")
             async with aiofiles.open(desc_file, "w", encoding="utf-8") as description_file:
-                await description_file.write(description_str)
+                await description_file.write(self.tracker_specific_formats(self.tracker, "\n".join(part for part in (description_str, ((signature or (f"[right][url=https://github.com/wastaken7/Upload-Assistant][size=4]{meta.ua_signature}[/size][/url][/right]" if meta.ua_signature else "")) if ua_signature else "")) if part.strip())))  # fmt: off
 
-        return description_str
+        # fmt: off
+        return self.tracker_specific_formats(self.tracker, "\n".join(part for part in (description_str, ((signature or (f"[right][url=https://github.com/wastaken7/Upload-Assistant][size=4]{meta.ua_signature}[/size][/url][/right]" if meta.ua_signature else "")) if ua_signature else "")) if part.strip()))  # ci: ua_signature v4.5
+        # fmt: on
 
     async def _check_saved_pack_image_links(self, meta: Meta, approved_image_hosts: list[str]) -> dict[str, Any]:
         pack_images_file = Path(meta.base_dir) / "tmp" / meta.uuid / "pack_image_links.json"
@@ -1512,11 +1813,18 @@ class DescriptionBuilder:
                 logger.warning(f"[yellow]Warning: Could not load pack image data: {e!s}[/yellow]")
         return pack_images_data
 
-    async def _handle_discs_and_screenshots(self, meta: Meta, approved_image_hosts: list[str], images: list[dict[str, str]], multi_screens: int) -> str:
+    async def _handle_discs_and_screenshots(
+        self,
+        meta: Meta,
+        approved_image_hosts: list[str],
+        images: list[dict[str, str]],
+        multi_screens: int,
+        include_header: bool = True,
+    ) -> str:
         if not images:
             return ""
         try:
-            screenheader = await self.screenshot_header(meta)
+            screenheader = await self.screenshot_header(meta) if include_header else ""
         except Exception:
             screenheader = None
 
@@ -1891,6 +2199,7 @@ class DescriptionBuilder:
                                     meta,
                                     multi_screens,
                                     True,
+                                    cleanup_after_capture=False,
                                     capture_group=f"FILE_{i}",
                                 )
                                 await asyncio.sleep(0.1)
@@ -1955,9 +2264,6 @@ class DescriptionBuilder:
                         desc_parts.append(f"[center][spoiler={filename}]{formatted_bbcode}[/spoiler][/center]\n")
                         char_count += len(f"[center][spoiler={filename}]{formatted_bbcode}[/spoiler][/center]\n")
                     else:
-                        if i == 0 and images and screenheader is not None:
-                            desc_parts.append(screenheader + "\n")
-                            char_count += len(screenheader + "\n")
                         desc_parts.append(f"[center]{filename}\n[/center]\n")
                         char_count += len(f"[center]{filename}\n[/center]\n")
 
@@ -2012,11 +2318,6 @@ class DescriptionBuilder:
 
             # If screens_per_row is set, use that to determine how many screenshots should be on each row. Otherwise, use 2 as default
             screens_per_row = self._get_int_config("screens_per_row", 2)
-            if self.tracker == "HAWKEUNO":
-                width = self._get_int_config("thumbnail_size", 350)
-                # Adjust screens_per_row to keep total width below 1100
-                while screens_per_row * width > 1100 and screens_per_row > 1:
-                    screens_per_row -= 1
         except Exception:
             screens_per_row = 2
         return screens_per_row
@@ -2062,20 +2363,9 @@ class DescriptionBuilder:
         if not thumb_size:
             thumb_size = self._get_int_config("thumbnail_size", 350)
 
-        nexusphp_trackers = {
-            "1PTBA",
-            "LAJIDUI",
-            "LEMONHD",
-            "LONGPT",
-            "PTCAFE",
-            "PTFANS",
-            "PTGTK",
-            "PTZONE",
-            "RAILGUNPT",
-            "XINGYUNGEPT",
-            "NEXUSPHP",
-        }
-        if self.tracker in nexusphp_trackers:
+        from src.trackersetup import get_tracker_framework
+
+        if get_tracker_framework(self.tracker) == "NEXUSPHP":
             return f"[img]{raw_url}[/img]"
         if self.tracker == "HDTORRENTS":
             return f"<a href='{raw_url}'><img src='{img_url}' height=137></a> "
@@ -2093,6 +2383,26 @@ class DescriptionBuilder:
 
     def tracker_specific_formats(self, tracker: str, description: str) -> str:
         bbcode = BBCODE()
+        from src.trackersetup import get_tracker_framework
+
+        if get_tracker_framework(tracker) == "UNIT3D":
+            # Protect comparison payloads from all formatting, including newline cleanup.
+            comparisons: list[str] = []
+
+            def preserve_comparison(match: re.Match[str]) -> str:
+                comparisons.append(match.group(0))
+                return f"\x00COMPARISON{len(comparisons) - 1}\x00"
+
+            description = re.sub(r"\[comparison=[^\]]*\].*?\[/comparison\]", preserve_comparison, description, flags=re.IGNORECASE | re.DOTALL)
+
+        if get_tracker_framework(tracker) == "NEXUSPHP":
+            description = bbcode.remove_img_resize(description)
+
+        if tracker in {"ANTHELION", "BJSHARE", "BRASILTRACKER", "GREATPOSTERWALL"}:
+            description = bbcode.clamp_size_tags(description)
+            description = bbcode.convert_named_colors(description)
+            description = bbcode.convert_headings_to_sizes(description)
+
         if tracker == "BRASILTRACKER":
             description = bbcode.remove_img_resize(description)
             description = bbcode.remove_list(description)
@@ -2201,7 +2511,7 @@ class DescriptionBuilder:
             description = bbcode.remove_img_resize(description)
             description = bbcode.convert_comparison_to_centered(description, 1000)
             description = bbcode.remove_spoiler(description)
-            description = bbcode.remove_color(description)
+            description = bbcode.convert_hex_colors_to_named(description)
 
             # Apply custom image line breaks for HDSPACE: if "imgbox" is not in the web_url, place only one image per line.
             def hds_image_formatter(match) -> str:
@@ -2254,7 +2564,7 @@ class DescriptionBuilder:
             description = bbcode.remove_spoiler(description)
             description = bbcode.remove_list(description)
 
-        if tracker == "PTSKIT":
+        if get_tracker_framework(tracker) == "NEXUSPHP":
             description = description.replace("[user]", "").replace("[/user]", "")
             description = description.replace("[align=left]", "").replace("[/align]", "")
             description = description.replace("[right]", "").replace("[/right]", "")
@@ -2270,6 +2580,7 @@ class DescriptionBuilder:
             description = description.replace("[ul]", "").replace("[/ul]", "")
             description = description.replace("[ol]", "").replace("[/ol]", "")
             description = description.replace("[hide]", "").replace("[/hide]", "")
+            description = bbcode.remove_img_resize(description)
             description = re.sub(r"\[center\]\[spoiler=.*? NFO:\]\[code\](.*?)\[/code\]\[/spoiler\]\[/center\]", r"", description, flags=re.DOTALL)
             description = bbcode.convert_comparison_to_centered(description, 1000)
             description = bbcode.remove_spoiler(description)
@@ -2304,14 +2615,15 @@ class DescriptionBuilder:
             # Strip BBCode names and attributes while retaining their contents.
             description = re.sub(r"\[/?[a-z][a-z0-9_-]*(?:=[^\]]*|\s+[^\]]*)?\]|\[\*\]", "", description, flags=re.IGNORECASE)
 
-        from src.trackersetup import api_trackers as unit3d_trackers
-
-        if tracker in unit3d_trackers:
+        if get_tracker_framework(tracker) == "UNIT3D":
             description = bbcode.convert_hide_to_spoiler(description)
             description = description.replace("[user]", "").replace("[/user]", "")
             description = description.replace("[hr]", "").replace("[/hr]", "")
             description = description.replace("[ul]", "").replace("[/ul]", "")
             description = description.replace("[ol]", "").replace("[/ol]", "")
-            description = bbcode.convert_comparison_to_collapse(description, 1000)
+            description = bbcode.remove_extra_lines(description)
+            for index, comparison in enumerate(comparisons):
+                description = description.replace(f"\x00COMPARISON{index}\x00", comparison)
+            return description
 
         return bbcode.remove_extra_lines(description)

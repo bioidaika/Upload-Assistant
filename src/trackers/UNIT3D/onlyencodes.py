@@ -2,10 +2,14 @@
 import re
 from typing import Any, cast
 
+from src.console import logger
+from src.get_desc import DescriptionBuilder
 from src.languages import languages_manager
 from src.meta import Meta
 from src.rehostimages import ImageHostPolicy, RehostImagesManager
+from src.tracker_images import get_tracker_image_collection
 from src.trackers.common import Common
+from src.trackers.naming import add_incomplete_pack_marker
 from src.trackers.UNIT3D import UNIT3D
 
 Config = dict[str, Any]
@@ -17,7 +21,7 @@ class OnlyEncodes(UNIT3D):
     """
 
     tracker = "ONLYENCODES"
-    display_name = "OnlyEncodes"
+    display_name = "OnlyEncodes+"
     allows_bloated_audio = True
     base_url = "https://onlyencodes.cc"
     approved_image_hosts = ("imgbox", "imgbb", "onlyimage", "ptscreens", "passtheimage")
@@ -185,12 +189,43 @@ class OnlyEncodes(UNIT3D):
         if not self.common.check_and_confirm_adult_media_upload(meta, self.tracker):
             return False
 
+        if int(meta.screens or 0) < 3:
+            logger.info(f"{self.tracker}: [bold yellow]At least 3 full-screen screenshots are required. Skipping upload.[/bold yellow]")
+            return False
+
         return not (
             meta.is_disc != "BDMV"
             and not await self.common.check_language_requirements(meta, self.tracker, languages_to_check=["english"], check_audio=True, check_subtitle=True)
         )
 
+    async def get_description(self, meta: Meta) -> dict[str, str]:
+        screenshots = get_tracker_image_collection(meta, self.tracker, "screenshots") or []
+        linked_screenshots = [image for image in screenshots if isinstance(image, dict) and image.get("web_url") and (image.get("raw_url") or image.get("img_url"))]
+        if len(linked_screenshots) < 3:
+            raise ValueError(f"{self.tracker}: At least 3 hosted, linked screenshots are required")
+
+        builder = DescriptionBuilder(self.tracker, self.config)
+        # OnlyEncodes requires linked medium thumbnails from the first episode or
+        # movie. Keep these overrides local so other trackers retain user settings.
+        builder.tracker_config = {
+            **builder.tracker_config,
+            "add_logo": False,
+            "multiScreens": 0,
+            "thumbnail_size": 350,
+            "pack_thumb_size": 350,
+        }
+        return {
+            "description": await builder.general_description_generator(
+                meta,
+                logo=False,
+                mediainfo=False,
+                nfo=False,
+                approved_image_hosts=list(self.approved_image_hosts),
+            )
+        }
+
     async def get_name(self, meta: Meta) -> dict[str, str]:
+        # Keep the TMDB title and year from the generated name for OnlyEncodes.
         oe_name = meta.name
         resolution = meta.resolution
         video_encode = meta.video_encode
@@ -198,23 +233,6 @@ class OnlyEncodes(UNIT3D):
         source = str(meta.source)
         audio = meta.audio
         video_codec = meta.video_codec
-
-        imdb_info = cast(dict[str, Any], meta.imdb_info)
-        imdb_name = str(imdb_info.get("title", ""))
-        imdb_year = str(imdb_info.get("year", ""))
-        imdb_aka = str(imdb_info.get("aka", ""))
-        year = str(meta.year) if meta.year is not None else ""
-        aka = meta.aka
-        if imdb_name and imdb_name.strip():
-            if aka:
-                oe_name = oe_name.replace(f"{aka} ", "", 1)
-            oe_name = oe_name.replace(f"{meta.title}", imdb_name, 1)
-
-            if imdb_aka and imdb_aka.strip() and imdb_aka != imdb_name and not meta.no_aka:
-                oe_name = oe_name.replace(f"{imdb_name}", f"{imdb_name} AKA {imdb_aka}", 1)
-
-        if meta.category != "TV" and imdb_year and imdb_year.strip() and year and year.strip() and imdb_year != year:
-            oe_name = oe_name.replace(f"{year}", imdb_year, 1)
 
         if name_type == "DVDRIP":
             if meta.category == "MOVIE":
@@ -236,7 +254,11 @@ class OnlyEncodes(UNIT3D):
         uuid_value = meta.basename_no_ext
         scale = "DS4K" if "DS4K" in uuid_value.upper() else "RM4K" if "RM4K" in uuid_value.upper() else ""
         if name_type in ["ENCODE", "WEBDL", "WEBRIP"] and scale != "":
-            oe_name = oe_name.replace(f"{resolution}", f"{scale}", 1)
+            if scale not in oe_name:
+                if resolution and resolution in oe_name:
+                    oe_name = oe_name.replace(f"{resolution}", f"{resolution} {scale}", 1)
+            elif resolution and f"{resolution} {scale}" not in oe_name:
+                oe_name = oe_name.replace(scale, f"{resolution} {scale}", 1)
 
         tag_value = meta.tag or ""
         tag_lower = tag_value.lower()
@@ -246,7 +268,7 @@ class OnlyEncodes(UNIT3D):
                 oe_name = re.sub(f"-{invalid_tag}", "", oe_name, flags=re.IGNORECASE)
             oe_name = f"{oe_name}-NOGRP"
 
-        return {"name": oe_name}
+        return {"name": add_incomplete_pack_marker(oe_name, meta, self.tracker)}
 
     async def get_type_id(self, meta: Meta, type: str | None = None, reverse: bool = False, mapping_only: bool = False) -> dict[str, str]:
         video_codec = meta.video_codec if meta.video_codec is not None else "N/A"

@@ -139,7 +139,7 @@ class TrackerDataManager:
                 btn_config = trackers_config.get("BROADCASTHENET", trackers_config.get("BTN", {})) if isinstance(trackers_config, dict) else {}
                 btn_api = btn_config.get("api_key") if isinstance(btn_config, dict) else None
                 btn_api = btn_api or self.default_config.get("btn_api")
-                if not isinstance(btn_api, str) or len(btn_api) <= 25:
+                if not isinstance(btn_api, str) or not btn_api.strip():
                     return None
                 btn_api_url = btn_config.get("api_url", "https://api.broadcasthe.net/") if isinstance(btn_config, dict) else "https://api.broadcasthe.net/"
                 imdb, tvdb = await BtnIdManager.get_btn_torrents(btn_api, btn_id, str(btn_api_url))
@@ -226,7 +226,7 @@ class TrackerDataManager:
                     version = 1
                 await asyncio.to_thread(save_review, temp_dir, candidate.description, version)
             return
-        logger.info(f"[cyan]Selected description from {tracker_name}:[/cyan]\n{candidate.description[:1000]}", extra={"markup": False})
+        logger.info(f"Selected description from {tracker_name}:\n{candidate.description[:1000]}", extra={"markup": False})
         choice = await prompt_in_thread(cli_ui.ask_string, "\nEnter 'e' to edit, 'd' to discard the description, or press Enter to keep it: ")
         choice = (choice or "").strip().lower()
         if choice == "e":

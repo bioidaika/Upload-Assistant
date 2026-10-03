@@ -1,7 +1,9 @@
 # Upload Assistant © 2025 Audionut & wastaken7 — Licensed under UAPL v1.0
 import asyncio
 import copy
+import inspect
 import sys
+import time
 from collections.abc import Mapping
 from typing import Any, cast
 
@@ -13,8 +15,9 @@ from src.dupe_checking import DupeChecker
 from src.imdb import imdb_manager
 from src.meta import Meta
 from src.metadata_searching import get_douban_id
+from src.stats import record_event_async
 from src.trackers.AVISTAZ.routing import AvistaZNetworkRouter
-from src.trackers.passthepopcorn import PassThePopcorn
+from src.trackers.GAZELLE.passthepopcorn import PassThePopcorn
 from src.trackersetup import TrackerSetup, tracker_class_map
 from src.uphelper import UploadHelper
 
@@ -32,6 +35,32 @@ class TrackerStatusManager:
         self.config = config
         self.trackers_config = cast(Mapping[str, Mapping[str, Any]], config.get("TRACKERS", {}))
 
+    async def _run_additional_checks(self, tracker_name: str, tracker: Any, meta: Meta, helper: Any) -> bool:
+        """Run tracker checks and let an attended user override a failed check.
+
+        Tracker checks deliberately remain responsible for validating tracker rules
+        and explaining failures.  The upload decision belongs here so every
+        tracker gets the same attended/unattended behaviour.
+        """
+        check = getattr(tracker, "get_additional_checks", None)
+        if check is None:
+            return True
+
+        result = await check(meta) if inspect.iscoroutinefunction(check) else check(meta)
+        if result or meta.get("unattended", False):
+            return bool(result)
+
+        if sys.stdin.closed:
+            return False
+
+        try:
+            return await helper.prompt_yes_no(
+                f"{tracker_name}: one or more upload checks failed. Do you want to proceed with the upload anyway?",
+                default=False,
+            )
+        except EOFError:
+            return False
+
     async def process_all_trackers(self, meta: Meta) -> int:
         tracker_status: dict[str, dict[str, Any]] = {}
         successful_trackers = 0
@@ -40,23 +69,6 @@ class TrackerStatusManager:
         await AvistaZNetworkRouter(self.config, tracker_class_map).apply(meta)
         helper: Any = UploadHelper(self.config)
         dupe_checker = DupeChecker(self.config)
-        if any(
-            tracker in meta.trackers
-            for tracker in [
-                "1PTBA",
-                "LAJIDUI",
-                "LEMONHD",
-                "LONGPT",
-                "MTEAM",
-                "PTCAFE",
-                "PTFANS",
-                "PTGTK",
-                "PTZONE",
-                "RAILGUNPT",
-                "XINGYUNGEPT",
-            ]
-        ):
-            meta.douban_id = await get_douban_id(meta)
         meta_lock = asyncio.Lock()
         status_map = meta.tracker_status
         for tracker in meta.trackers:
@@ -86,12 +98,32 @@ class TrackerStatusManager:
                     if imdb_id.startswith("tt") and imdb_id[2:].isdigit():
                         meta["imdb_id"] = int(imdb_id[2:])
                         meta["imdb"] = imdb_id[2:].zfill(7)
+                        meta["imdb_tt"] = imdb_id
                         meta["imdb_info"] = await imdb_manager.get_imdb_info_api(
                             meta["imdb_id"],
                             manual_language=meta.get("manual_language"),
                         )
                         break
                     cli_ui.error("Invalid IMDB ID format. Expected format: tt1234567")
+
+        if any(
+            tracker in meta.trackers
+            for tracker in [
+                "1PTBA",
+                "LAJIDUI",
+                "LEMONHD",
+                "LONGPT",
+                "MTEAM",
+                "PTCAFE",
+                "PTERCLUB",
+                "PTFANS",
+                "PTGTK",
+                "PTZONE",
+                "RAILGUNPT",
+                "XINGYUNGEPT",
+            ]
+        ):
+            meta.douban_id = await get_douban_id(meta)
 
         async def process_single_tracker(tracker_name: str, shared_meta: Meta) -> tuple[str, dict[str, bool], str | None, Any]:
             local_meta = copy.deepcopy(shared_meta)  # Ensure each task gets its own copy of meta
@@ -155,26 +187,27 @@ class TrackerStatusManager:
                     local_tracker_status["skipped"] = bool(claimed)
 
                     if tracker_name not in {"PASSTHEPOPCORN"} and not local_tracker_status["skipped"]:
-                        if hasattr(tracker_class, "get_additional_checks"):
-                            import inspect
-
-                            if inspect.iscoroutinefunction(tracker_class.get_additional_checks):
-                                should_continue = await tracker_class.get_additional_checks(local_meta)
-                            else:
-                                should_continue = tracker_class.get_additional_checks(local_meta)
-                            if not should_continue:
-                                local_tracker_status["skipped"] = True
-                                local_meta.skipping = tracker_name
+                        should_continue = await self._run_additional_checks(tracker_name, tracker_class, local_meta, helper)
+                        if not should_continue:
+                            local_tracker_status["skipped"] = True
+                            local_meta.skipping = tracker_name
 
                         if not local_tracker_status["skipped"]:
+                            search_started = time.monotonic()
                             try:
                                 dupes: list[Any] = cast(list[Any], await tracker_class.search_existing(local_meta))
+                                await record_event_async(
+                                    "api", service=tracker_name, operation="search", outcome="success", duration_ms=(time.monotonic() - search_started) * 1000
+                                )
                                 # set trackers here so that they are not double checked later with cross seeding
                                 async with meta_lock:
                                     meta.setdefault("dupe_checked_trackers", []).append(tracker_name)
                                 if local_meta["tracker_status"][tracker_name].get("other", False):
                                     local_tracker_status["other"] = True
                             except Exception as e:
+                                await record_event_async(
+                                    "api", service=tracker_name, operation="search", outcome="error", duration_ms=(time.monotonic() - search_started) * 1000
+                                )
                                 logger.info(f"[bold red]Error searching for duplicates on {tracker_name}: {e}[/bold red]")
                                 if local_meta.get("unattended", False):
                                     local_tracker_status["skipped"] = True
@@ -202,24 +235,25 @@ class TrackerStatusManager:
                             dupes = []
                     elif tracker_name == "PASSTHEPOPCORN":
                         ptp: Any = PassThePopcorn(config=self.config)
-                        if hasattr(ptp, "get_additional_checks"):
-                            import inspect
-
-                            if inspect.iscoroutinefunction(ptp.get_additional_checks):
-                                should_continue = await ptp.get_additional_checks(local_meta)
-                            else:
-                                should_continue = ptp.get_additional_checks(local_meta)
-                            if not should_continue:
-                                local_tracker_status["skipped"] = True
-                                local_meta.skipping = tracker_name
+                        should_continue = await self._run_additional_checks(tracker_name, ptp, local_meta, helper)
+                        if not should_continue:
+                            local_tracker_status["skipped"] = True
+                            local_meta.skipping = tracker_name
 
                         if not local_tracker_status["skipped"]:
+                            search_started = time.monotonic()
                             try:
                                 group_id = await ptp.get_group_by_imdb(local_meta["imdb"])
                                 async with meta_lock:
                                     meta.ptp_groupid = group_id
                                 dupes = cast(list[Any], await ptp.search_existing(group_id or "", cast(dict[str, Any], local_meta)))
+                                await record_event_async(
+                                    "api", service=tracker_name, operation="search", outcome="success", duration_ms=(time.monotonic() - search_started) * 1000
+                                )
                             except Exception as e:
+                                await record_event_async(
+                                    "api", service=tracker_name, operation="search", outcome="error", duration_ms=(time.monotonic() - search_started) * 1000
+                                )
                                 logger.info(f"[bold red]Error searching for duplicates on {tracker_name}: {e}[/bold red]")
                                 if local_meta.get("unattended", False):
                                     local_tracker_status["skipped"] = True
@@ -249,14 +283,6 @@ class TrackerStatusManager:
                         if "initial_dupes" not in meta:
                             meta.initial_dupes = {}
                         meta.initial_dupes[tracker_name] = copy.deepcopy(dupes)
-
-                    if tracker_name == "AMIGOSSHARE" and (meta.anon if meta.anon is not None else "false"):
-                        logger.info(
-                            "PORTUGAS: [yellow]Aviso: Você solicitou um upload anônimo, mas o AMIGOSSHARE não suporta essa opção.[/yellow][red] O envio não será anônimo.[/red]"
-                        )
-                        logger.warning(
-                            "EN: [yellow]Warning: You requested an anonymous upload, but AMIGOSSHARE does not support this option.[/yellow][red] The upload will not be anonymous.[/red]"
-                        )
 
                     if ("skipping" not in local_meta or local_meta["skipping"] is None) and not local_tracker_status["skipped"]:
                         dupes = cast(list[Any], await dupe_checker.filter_dupes(dupes, local_meta, tracker_name))

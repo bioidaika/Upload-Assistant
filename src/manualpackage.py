@@ -15,6 +15,7 @@ from torf import Torrent
 from src.console import logger
 from src.meta import Meta
 from src.temp_paths import artwork_dir
+from src.torrent_manifest import TorrentManifest
 from src.uploadscreens import UploadScreensManager
 
 
@@ -42,13 +43,14 @@ class ManualPackageManager:
             await generic.write(f"Category: {meta.category}\n")
             if meta.tmdb:
                 await generic.write(f"TMDB: https://www.themoviedb.org/{meta.category.lower()}/{meta.tmdb}\n")
-            if meta.imdb_id != 0:
-                await generic.write(f"IMDb: https://www.imdb.com/title/tt{meta.imdb_id}\n")
+            if meta.imdb_tt:
+                await generic.write(f"IMDb: https://www.imdb.com/title/{meta.imdb_tt}\n")
             if meta.tvdb_id != 0:
                 await generic.write(f"TVDB: https://www.thetvdb.com/?id={meta.tvdb_id}&tab=series\n")
             if "tvmaze_id" in meta and meta.tvmaze_id != 0:
                 await generic.write(f"TVMaze: https://www.tvmaze.com/shows/{meta.tvmaze_id}\n")
-            poster_img = str(artwork_dir(meta.base_dir, meta.uuid) / "POSTER.png")
+            configured_poster = Path(str(meta.artwork_path or ""))
+            poster_img = str(configured_poster if configured_poster.is_file() else artwork_dir(meta.base_dir, meta.uuid) / "POSTER.png")
             if meta.artwork_url not in ["", None] and not Path(poster_img).exists():
                 if meta.rehosted_artwork_url is None:
                     async with httpx.AsyncClient(timeout=30.0) as client:
@@ -83,11 +85,11 @@ class ManualPackageManager:
                 if not each.startswith(("BASE", "[RAND")):
                     Path(f"{meta.base_dir}{'/' + 'tmp' + '/'}{meta.uuid}/{each}").resolve().unlink()
         try:
-            if Path(f"{meta.base_dir}{'/' + 'tmp' + '/'}{meta.uuid}/BASE.torrent").exists():
-                base_torrent = Torrent.read(f"{meta.base_dir}{'/' + 'tmp' + '/'}{meta.uuid}/BASE.torrent")
+            base_path = TorrentManifest(meta.base_dir, meta.uuid).default_path()
+            if base_path is not None:
+                base_torrent = Torrent.read(base_path)
                 manual_name = re.sub(r"[^0-9a-zA-Z\[\]\'\-]+", ".", Path(meta.path or "").name)
                 Torrent.copy(base_torrent).write(f"{meta.base_dir}{'/' + 'tmp' + '/'}{meta.uuid}/{manual_name}.torrent", overwrite=True)
-                # shutil.copy(os.path.abspath(f"{meta.base_dir}/tmp/{meta.uuid}/BASE.torrent"), os.path.abspath(f"{meta.base_dir}/tmp/{meta.uuid}/{meta.name.replace(' ', '.')}.torrent").replace(' ', '.'))
             manual_tracker_raw = self.tracker_config.get("MANUAL")
             manual_tracker_cfg: dict[str, Any] = cast(dict[str, Any], manual_tracker_raw) if isinstance(manual_tracker_raw, dict) else {}
             manual_filebrowser = manual_tracker_cfg.get("filebrowser")

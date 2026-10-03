@@ -1,5 +1,4 @@
 import asyncio
-import json
 
 # Upload Assistant © 2025 Audionut & wastaken7 — Licensed under UAPL v1.0
 from collections.abc import Callable
@@ -7,10 +6,13 @@ from pathlib import Path
 from typing import Any, cast
 
 from src.artwork import prepare_artwork
-from src.cogs.redaction import PathAwareEncoder
+from src.bluray_com import reset_release_subheader_cache
+from src.content_duration import populate_content_duration
 from src.meta import Meta
+from src.meta_file import write_meta_file
 from src.metadata_cache import set_run_disabled
 from src.screenshot_manifest import files as manifest_files
+from src.stats import stats_collection_enabled
 
 console: Any = None
 
@@ -156,12 +158,14 @@ class Prep:
             return
         meta_file = Path(meta.base_dir) / "tmp" / meta.uuid / "meta.json"
         meta_file.parent.mkdir(parents=True, exist_ok=True)
-        async with aiofiles.open(meta_file, "w", encoding="utf-8") as snapshot:
-            await snapshot.write(json.dumps(meta.to_dict(), indent=4, cls=PathAwareEncoder))
+        if meta_file.exists():
+            return
+        await write_meta_file(meta)
         if self.publish_preview is not None:
             self.publish_preview(str(meta.path or ""), meta.uuid)
 
     async def gather_prep(self, meta: Meta, mode: str) -> Meta:
+        reset_release_subheader_cache()
         meta_start_time = time.time()
         set_run_disabled(bool(getattr(meta, "no_metadata_cache", False)))
 
@@ -184,6 +188,8 @@ class Prep:
             await _enrich_music_from_orpheus_fn(meta, self.config)
             await _enrich_music_from_discogs_fn(meta, self.config)
             await prepare_artwork(meta)
+            if stats_collection_enabled(self.config):
+                await populate_content_duration(meta, self.config)
             logger.debug(f"Music metadata processed in {time.time() - meta_start_time:.2f} seconds")
             return meta
 
@@ -241,6 +247,13 @@ class Prep:
 
         await languages_manager.process_desc_language(meta)
 
+        if meta.manual_overview:
+            meta.overview = meta.manual_overview.strip()
+            if meta.category == "GAME":
+                meta.localized_overviews = {}
+        if meta.manual_genres:
+            meta.genres = [genre.strip() for genre in meta.manual_genres.split(",") if genre.strip()]
+
         # Ensure the background capture is complete before the upload stage
         # starts consuming the generated files. Any error is logged by the
         # helper; the existing upload-stage capture remains the fallback.
@@ -259,10 +272,10 @@ class Prep:
         if meta.category == "BOOK":
             await self.rehost_images_manager.takescreens_manager.prepare_book_cover(videopath, meta.uuid, meta.base_dir, meta)
             await prepare_artwork(meta)
-            meta_path = Path(f"{meta.base_dir}{'/' + 'tmp' + '/'}{meta.uuid}/meta.json")
-            meta_path.parent.mkdir(parents=True, exist_ok=True)
-            async with aiofiles.open(meta_path, "w", encoding="utf-8") as meta_file:
-                await meta_file.write(json.dumps(meta.to_dict(), indent=4, cls=PathAwareEncoder))
+            await write_meta_file(meta)
+
+        if stats_collection_enabled(self.config):
+            await populate_content_duration(meta, self.config)
 
         logger.debug(f"Metadata processed in {time.time() - meta_start_time:.2f} seconds")
 
@@ -378,7 +391,7 @@ class Prep:
         return any(re.search(rf"(^|,\s*){re.escape(keyword)}(\s*,|$)", searchable, re.IGNORECASE) for keyword in adult_keywords)
 
     async def get_cat(self, _video: str, meta: Meta) -> str | None:
-        if meta.manual_category:
+        if meta.manual_category and meta.manual_category.strip().upper() != "SPORTS":
             manual_category = meta.manual_category
             return manual_category.upper() if isinstance(manual_category, str) else None
 

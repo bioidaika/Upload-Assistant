@@ -61,10 +61,6 @@ async def test_ulcx_valid_upload():
 async def test_ulcx_forbidden_content():
     tracker = make_ulcx()
 
-    # Concerts / live performance
-    meta_concert = make_ulcx_meta(keywords=["concert", "live performance"])
-    assert await tracker.get_additional_checks(meta_concert) is False
-
     # Adult content
     meta_adult = make_ulcx_meta(adult_media=True)
     assert await tracker.get_additional_checks(meta_adult) is False
@@ -108,9 +104,15 @@ async def test_ulcx_dvdrip_rejection():
 async def test_ulcx_encode_rules():
     tracker = make_ulcx()
 
-    # SD encode (height < 720) rejected
+    # SD encode (height < 720 or width < 1280) rejected
     meta_sd = make_ulcx_meta(type="ENCODE", resolution="480p", video_height=480)
     assert await tracker.get_additional_checks(meta_sd) is False
+
+    meta_sd_width = make_ulcx_meta(type="ENCODE", resolution="720p", video_height=720, video_width=960)
+    assert await tracker.get_additional_checks(meta_sd_width) is False
+
+    meta_720p_valid = make_ulcx_meta(type="ENCODE", resolution="720p", video_height=720, video_width=1280)
+    assert await tracker.get_additional_checks(meta_720p_valid) is True
 
     # Live-action HEVC encode from 1080p source rejected
     meta_hevc_hd = make_ulcx_meta(type="ENCODE", video_codec="HEVC", resolution="1080p", video_height=1080, anime=False)

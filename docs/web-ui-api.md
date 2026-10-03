@@ -1,6 +1,6 @@
-# Upload Assistant — Web UI API Reference
+# Upload Assistant — WebUI API Reference
 
-This document summarizes the Web UI HTTP API implemented in web_ui/server.py. For each endpoint: HTTP methods, authentication/CSRF requirements, accepted payload or query parameters, special rules (token rules, rate limits), and example response shapes.
+This document summarizes the WebUI HTTP API implemented in `web_ui/server.py`. For each endpoint it lists HTTP methods, authentication and CSRF requirements, accepted payload or query parameters, special rules, and example response shapes. For normal browser usage, see the [WebUI guide](web-ui.md).
 
 ---
 
@@ -12,13 +12,26 @@ This document summarizes the Web UI HTTP API implemented in web_ui/server.py. Fo
 - Description: basic health check
 - Response: {"status": "healthy", "success": true, "message": "..."}
 
+### /api/stats
+
+- Methods: GET, DELETE
+- Auth: authenticated browser session only; Bearer tokens are rejected
+- CSRF: valid CSRF header and same-origin request required for both methods
+- GET query: `range=today|this_month|last_month|7d|30d|90d|1y|all|custom`, `mode=real|debug`, and optional `tracker=<canonical ID>`. The default `timezone=utc` uses the server's current UTC date. `timezone=browser` requires the browser to send its current local date as `today=YYYY-MM-DD`; preset and custom-range validation then use that local date boundary. A custom range requires inclusive dates in `from=YYYY-MM-DD` and `to=YYYY-MM-DD`. Stored activity remains grouped into its original UTC calendar-day buckets in either mode.
+- GET description: returns an `enabled` flag plus the stable overview, timeline, 365-day heatmap, previous-period comparison, Sankey route flow, upload destination/category, successful media time by category, category-specific media profile and resolution/profile matrix, streaming-service, personal/standard release-profile, artifact, cache, logical external-operation, execution-source, and filter shapes. Content aggregates honor `tracker`; cache and external-operation aggregates remain global. Volume fields contain media bytes rather than `.torrent` or `.nzb` file sizes. When collection is disabled, every aggregate is zero-filled and stored data is not read or returned.
+- DELETE payload: `{"confirmation":"RESET"}`
+- Read failures (including an unreadable database or unsupported schema version) return HTTP 500 with `success=false` and an error message, rather than an empty successful response. Unknown schema versions are preserved.
+- DELETE description: clears real and debug statistics in one transaction; caches, configuration, torrents, and NZBs are unaffected
+
+Statistics contain no per-release events, names, paths, release-group names or tags, external media IDs, URLs, or credentials. Tracker flow is stored as aggregate item×destination routes. The release profile stores only the aggregate `personal` or `standard` classification. `content_time` contains aggregate successful item counts and whole seconds by stable media category; an item is counted once globally regardless of its number of destinations. The `api` section counts logical adapter operations rather than transport retries. Its `bytes` values contain known payload bytes sent through NNTP and successful image uploads; zero means the payload size was unavailable or no measured bytes were sent.
+
 ### /api/execute
 
 - Methods: POST, OPTIONS
 - Auth: POST requires CSRF header for web session callers; Bearer tokens (API tokens) are accepted for programmatic use and bypass CSRF. Token must be valid.
 - Rate limit: 100 per hour (keyed by \_rate_limit_key_func)
 - POST payload: {"path": "`<file-or-folder>`", "args": "`<cmdline args>`", "session_id": "`<id>`"}
-- Description: start an `upload.py` run (either in a subprocess or in-process). The endpoint returns a Server-Sent Events (SSE) stream — connect using `Accept: text/event-stream` and read events as they arrive. `OPTIONS` responds with 204 for CORS preflight.
+- Description: start an isolated `upload.py` subprocess. The endpoint returns a Server-Sent Events (SSE) stream — connect using `Accept: text/event-stream` and read events as they arrive. `OPTIONS` responds with 204 for CORS preflight.
 - Notes on payload quoting and Windows paths:
   - JSON values must use double quotes. When sending Windows paths from shells that perform quoting/escaping (PowerShell, cmd.exe), backslashes need special handling (escape them or use forward slashes). To avoid brittle quoting, prefer one of the approaches in the examples below.
   - The server attempts tolerant parsing: it accepts JSON, form-encoded bodies, or will attempt conservative normalization of raw bodies to extract `path` and `session_id` if standard JSON parsing fails. However, relying on correct JSON or a file payload is recommended for reliability.
@@ -101,7 +114,7 @@ Notes:
 - Auth: requires either a valid Bearer API token (programmatic clients) OR a logged-in web session. Bearer tokens are allowed without CSRF; session callers must be authenticated. Rate-limited.
 - Rate limit: 200 per hour
 - POST payload: {"session_id": "default", "input": "..."}
-- Description: send interactive input to a running execution session (inproc queue or subprocess stdin)
+- Description: send interactive input to a running execution subprocess through stdin
 - Response: {"success": true} or error JSON
 
 ### /api/kill
@@ -205,6 +218,22 @@ The following endpoints via a valid web session.
 - Auth: requires web session + CSRF + Origin (disallows bearer token)
 - Description: returns list of configured torrent client names
 - Response: {"success": true, "clients": ["qbit", ...]}
+
+### /api/trackers
+
+- Methods: GET
+- Auth: requires web session + CSRF + Origin (disallows bearer token)
+- Description: returns the supported tracker catalogue, including display names, local icons, homepage URLs, and default/configured state
+- Response: {"success": true, "default_trackers": ["AITHER", ...], "trackers": [...]}
+
+### /api/tracker_status
+
+- Methods: GET, POST
+- Auth: requires web session + CSRF + Origin (disallows bearer token)
+- Rate limit: POST is limited to 30 checks per hour; GET only reads the in-memory cache
+- POST payload: {"trackers": ["AITHER", "BLUTOPIA"]}
+- Description: GET returns cached tracker website-reachability results. POST refreshes the named supported trackers concurrently without using credentials or downloading response bodies. Results expire after 15 minutes and are advisory only.
+- Response: {"success": true, "cache_seconds": 900, "statuses": {"AITHER": {"state": "available", "message": "...", "checked_at": "...", "stale": false}}}. Issue and unavailable results can also include a machine-readable `reason`, such as `timeout`, `connection`, `rate_limit`, or `server_error`.
 
 ### /api/config_update
 

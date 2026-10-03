@@ -29,6 +29,7 @@ class Curupira:
     auth_type = "other_api"
     tracker = "CURUPIRA"
     display_name = "Curupira"
+    supports_screenshots = True
     banned_groups = (
         "4K4U",
         "afm72",
@@ -152,7 +153,7 @@ class Curupira:
 
         params: dict[str, str] = {}
 
-        category = meta.category.upper()
+        category = meta.category.upper() if not meta.is_sports else "SPORTS"
 
         if category == "TV":
             params["t"] = "tvsearch"
@@ -160,8 +161,8 @@ class Curupira:
                 params["tvdbid"] = str(meta.tvdb_id)
             elif meta.tmdb_id and str(meta.tmdb_id).isdigit() and int(meta.tmdb_id) > 0:
                 params["tmdbid"] = str(meta.tmdb_id)
-            elif meta.imdb_id and int(meta.imdb_id) > 0:
-                params["imdbid"] = f"tt{meta.imdb}"
+            elif meta.imdb_tt:
+                params["imdbid"] = meta.imdb_tt
             else:
                 params["q"] = self.get_search_query(meta)
 
@@ -171,8 +172,8 @@ class Curupira:
                 params["ep"] = str(meta.episode_int)
         elif category == "MOVIE":
             params["t"] = "movie"
-            if meta.imdb_id and int(meta.imdb_id) > 0:
-                params["imdbid"] = f"tt{meta.imdb}"
+            if meta.imdb_tt:
+                params["imdbid"] = meta.imdb_tt
             elif meta.tmdb_id and str(meta.tmdb_id).isdigit() and int(meta.tmdb_id) > 0:
                 params["tmdbid"] = str(meta.tmdb_id)
             else:
@@ -225,6 +226,9 @@ class Curupira:
         # Check if anime
         if meta.anime:
             return "5070"
+
+        if meta.is_sports:
+            return "5060"
 
         category = meta.category.upper()
         resolution = meta.resolution.lower()

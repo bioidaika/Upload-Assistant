@@ -24,7 +24,7 @@ class MTeam:
 
     auth_type = "other_api"
     tracker = "MTEAM"
-    display_name = "MTeam"
+    display_name = "M-Team"
     allows_bloated_audio = True
     base_url = "https://kp.m-team.cc"
     api_base_url = "https://api.m-team.cc/api"
@@ -514,7 +514,7 @@ class MTeam:
             # "team": 0,
             # "processing": 0,
             # "countries": "",
-            "imdb": meta.imdb_info.get("imdbID", ""),
+            "imdb": meta.imdb_tt,
             "douban": meta.douban_id,
             # "dmmCode": "",
             # "cids": "",

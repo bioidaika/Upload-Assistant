@@ -3,6 +3,7 @@
 # ruff: noqa: S101
 
 import asyncio
+import json
 from pathlib import Path
 from typing import ClassVar
 from unittest.mock import AsyncMock
@@ -11,6 +12,7 @@ from src.meta import Meta
 from src.rehostimages import (
     ImageHostPolicy,
     RehostImagesManager,
+    _deduplicate_image_records,
     check_tracker_image_hosts,
     has_restricted_image_hosts,
     select_common_image_host,
@@ -43,6 +45,17 @@ class _PolicyTracker:
 
     def __init__(self) -> None:
         self.rehost_images_manager = AsyncMock()
+
+
+def test_deduplicates_tagged_image_records() -> None:
+    image = {
+        "img_url": "https://images.example.test/thumb.png",
+        "raw_url": "https://images.example.test/full.png",
+        "web_url": "https://images.example.test/view/1",
+        "tags": ["tonemapped"],
+    }
+
+    assert _deduplicate_image_records([image, dict(image)]) == [image]
 
 
 def test_has_restricted_image_hosts() -> None:
@@ -94,6 +107,43 @@ def test_music_does_not_rehost_missing_screenshots() -> None:
     asyncio.run(check_tracker_image_hosts(Meta(category="MUSIC"), tracker))
 
     tracker.rehost_images_manager.check_policy.assert_not_awaited()
+
+
+def test_reuses_rehosted_images_from_screenshot_cache(tmp_path: Path) -> None:
+    screenshots_path = tmp_path / "tmp" / "release" / "screenshots"
+    screenshots_path.mkdir(parents=True)
+    cached_images = [
+        {
+            "img_url": "https://i.ibb.co/cached.png",
+            "raw_url": "https://i.ibb.co/cached.png",
+            "web_url": "https://ibb.co/cached",
+        }
+    ]
+    (screenshots_path / "reuploaded_images.json").write_text(json.dumps(cached_images), encoding="utf-8")
+
+    manager = RehostImagesManager({"DEFAULT": {"img_host_1": "imgbb"}})
+    manager.uploadscreens_manager.upload_screens = AsyncMock()
+    meta = Meta(
+        base_dir=str(tmp_path),
+        uuid="release",
+        imghost="lostimg",
+        image_list=[{"raw_url": "https://lostimg.cc/original.png"}],
+    )
+
+    result, retry_mode, images_reuploaded = asyncio.run(
+        manager.check_hosts(
+            meta,
+            "TEST",
+            {"i.ibb.co": "imgbb", "lostimg.cc": "lostimg"},
+            approved_image_hosts=["imgbb"],
+        )
+    )
+
+    assert result == cached_images
+    assert not retry_mode
+    assert not images_reuploaded
+    assert meta.image_list == [{"raw_url": "https://lostimg.cc/original.png"}]
+    manager.uploadscreens_manager.upload_screens.assert_not_awaited()
 
 
 def test_rehosts_menu_and_spectrogram_images_without_touching_main_screens(tmp_path: Path):

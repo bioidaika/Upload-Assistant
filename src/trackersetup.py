@@ -14,6 +14,7 @@ import cli_ui
 import httpx
 
 from data.example_config import config as example_config
+from src.api_key_expiry import observe_tracker_response, warn_api_key_expiry
 from src.cleanup import cleanup_manager
 from src.console import logger
 from src.meta import Meta
@@ -66,7 +67,6 @@ STATIC_AUTH_TYPES = {
     "1PTBA": "cookies",
     "AITHER": "unit3d_api",
     "ALPHARATIO": "cookies",
-    "AMIGOSSHARE": "cookies",
     "ANTHELION": "other_api",
     "ASIANCINEMA": "unit3d_api",
     "AVISTAZ": "cookies",
@@ -115,6 +115,7 @@ STATIC_AUTH_TYPES = {
     "NEBULANCE": "other_api",
     "NORDICQUALITY": "unit3d_api",
     "NZBGEEK": "other_api",
+    "NZBNEST": "other_api",
     "OLDTOONSWORLD": "unit3d_api",
     "ONLYENCODES": "unit3d_api",
     "ORPHEUS": "other_api",
@@ -250,6 +251,12 @@ class TrackerSetup:
         for tracker in removed_trackers:
             logger.warning(f"Warning: Tracker '{tracker}' is not recognized and will be ignored.", extra={"markup": False})
 
+        for tracker in valid_trackers:
+            tracker_class = tracker_class_map.get(tracker)
+            api_key = str(self.config.get("TRACKERS", {}).get(tracker, {}).get("api_key") or "").strip()
+            if api_key and tracker_class:
+                warn_api_key_expiry(tracker, api_key, getattr(tracker_class, "base_url", ""), meta.base_dir)
+
         return valid_trackers
 
     async def get_banned_groups(self, meta: Meta, tracker: str) -> str | None:
@@ -289,6 +296,8 @@ class TrackerSetup:
                         # Add query parameters for pagination.
                         params = {"cursor": next_cursor, "per_page": 100} if next_cursor else {"per_page": 100}
                     response = await client.get(url=banned_url, headers=headers, params=params)
+                    if auth_mode == "bearer":
+                        observe_tracker_response(self.config, meta, tracker, response)
 
                     if response.status_code == 200:
                         response_json = response.json()
@@ -577,6 +586,7 @@ class TrackerSetup:
                     # Add query parameters for pagination
                     params: JsonDict = {"cursor": next_cursor, "per_page": 100} if next_cursor else {"per_page": 100}
                     response = await client.get(url=claims_url, headers=headers, params=params)
+                    observe_tracker_response(self.config, meta, tracker, response)
 
                     if response.status_code == 200:
                         response_json = response.json()
@@ -698,6 +708,7 @@ class TrackerSetup:
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.get(url=url, headers=headers, params=params)
+                observe_tracker_response(self.config, meta, tracker, response)
                 if response.status_code == 200:
                     data = response.json()
                     if not isinstance(data, dict):
@@ -820,7 +831,7 @@ class TrackerSetup:
             try:
                 url = tracker_instance.requests_url
             except AttributeError:
-                if tracker_name.upper() not in ("AMIGOSSHARE", "BJSHARE", "FUNFILE", "HDSPACE", "AVISTAZ", "CINEMAZ", "PRIVATEHD"):
+                if tracker_name.upper() not in ("BJSHARE", "FUNFILE", "HDSPACE", "AVISTAZ", "CINEMAZ", "PRIVATEHD"):
                     # tracker without requests url not supported
                     return False
 
@@ -828,7 +839,7 @@ class TrackerSetup:
                 if not url:
                     return False
                 requests = await self.bhd_request_check(meta, tracker_name, url)
-            elif tracker_name.upper() in ("AMIGOSSHARE", "BJSHARE", "FUNFILE", "HDSPACE", "AVISTAZ", "CINEMAZ", "PRIVATEHD", "MTEAM", "ORPHEUS"):
+            elif tracker_name.upper() in ("BJSHARE", "FUNFILE", "HDSPACE", "AVISTAZ", "CINEMAZ", "PRIVATEHD", "MTEAM", "ORPHEUS"):
                 # These trackers have custom request handling
                 requests = cast(list[JsonDict], await tracker_instance.get_requests(meta))
                 return bool(requests) if tracker_name.upper() == "ORPHEUS" else False
@@ -1380,6 +1391,7 @@ class TrackerSetup:
             try:
                 async with httpx.AsyncClient(timeout=10.0) as client:
                     response = await client.post(url=create_url, headers=headers, json=payload)
+                    observe_tracker_response(self.config, meta, tracker, response)
                     if response.status_code in (200, 201):
                         logger.info(f"[bold green]Successfully created trump report on {tracker}[/bold green]")
                         return True
@@ -1406,17 +1418,16 @@ tracker_class_map: Any = LazyTrackerDict(
     {
         "1PTBA": ("src.trackers.NEXUSPHP.oneptba", "OnePTBA"),
         "AITHER": ("src.trackers.UNIT3D.aither", "Aither"),
-        "ALPHARATIO": ("src.trackers.alpharatio", "AlphaRatio"),
-        "AMIGOSSHARE": ("src.trackers.amigosshare", "AmigosShare"),
-        "ANTHELION": ("src.trackers.anthelion", "Anthelion"),
+        "ALPHARATIO": ("src.trackers.GAZELLE.alpharatio", "AlphaRatio"),
+        "ANTHELION": ("src.trackers.GAZELLE.anthelion", "Anthelion"),
         "ASIANCINEMA": ("src.trackers.UNIT3D.asiancinema", "AsianCinema"),
         "AVISTAZ": ("src.trackers.AVISTAZ.avistaz", "AvistaZ"),
         "BEYONDHD": ("src.trackers.beyondhd", "BEYONDHD"),
         "BITHDTV": ("src.trackers.bithdtv", "BitHDTV"),
         "BITPORN": ("src.trackers.UNIT3D.bitporn", "BitPorn"),
-        "BJSHARE": ("src.trackers.bjshare", "BJShare"),
+        "BJSHARE": ("src.trackers.GAZELLE.bjshare", "BJShare"),
         "BLUTOPIA": ("src.trackers.UNIT3D.blutopia", "Blutopia"),
-        "BRASILTRACKER": ("src.trackers.brasiltracker", "BrasilTracker"),
+        "BRASILTRACKER": ("src.trackers.GAZELLE.brasiltracker", "BrasilTracker"),
         "BROADCASTHENET": ("src.trackers.broadcasthenet", "BroadcasTheNet"),
         "CAPYBARABR": ("src.trackers.UNIT3D.capybarabr", "CapybaraBR"),
         "CATHODERAYTUBE": ("src.trackers.cathoderaytube", "CathodeRayTube"),
@@ -1432,7 +1443,7 @@ tracker_class_map: Any = LazyTrackerDict(
         "FILELIST": ("src.trackers.filelist", "FileList"),
         "FLOOD": ("src.trackers.flood", "Flood"),
         "FUNFILE": ("src.trackers.funfile", "FunFile"),
-        "GREATPOSTERWALL": ("src.trackers.greatposterwall", "GreatPosterWall"),
+        "GREATPOSTERWALL": ("src.trackers.GAZELLE.greatposterwall", "GreatPosterWall"),
         "HAWKEUNO": ("src.trackers.UNIT3D.hawkeuno", "HawkeUno"),
         "HDBITS": ("src.trackers.hdbits", "HDBits"),
         "HDSPACE": ("src.trackers.hdspace", "HDSpace"),
@@ -1453,22 +1464,23 @@ tracker_class_map: Any = LazyTrackerDict(
         "MAKINGOFF": ("src.trackers.makingoff", "MakingOff"),
         "MIDNIGHTSCENE": ("src.trackers.UNIT3D.midnightscene", "MidnightScene"),
         "MTEAM": ("src.trackers.mteam", "MTeam"),
-        "NEBULANCE": ("src.trackers.nebulance", "Nebulance"),
+        "NEBULANCE": ("src.trackers.GAZELLE.nebulance", "Nebulance"),
         "NORDICQUALITY": ("src.trackers.UNIT3D.nordicquality", "NordicQuality"),
         "NZBGEEK": ("src.trackers.USENET.nzbgeek", "NZBGeek"),
+        "NZBNEST": ("src.trackers.USENET.nzbnest", "NzbNest"),
         "OLDTOONSWORLD": ("src.trackers.UNIT3D.oldtoonsworld", "OldToonsWorld"),
         "ONLYENCODES": ("src.trackers.UNIT3D.onlyencodes", "OnlyEncodes"),
-        "ORPHEUS": ("src.trackers.orpheus", "Orpheus"),
-        "PASSTHEPOPCORN": ("src.trackers.passthepopcorn", "PassThePopcorn"),
+        "ORPHEUS": ("src.trackers.GAZELLE.orpheus", "Orpheus"),
+        "PASSTHEPOPCORN": ("src.trackers.GAZELLE.passthepopcorn", "PassThePopcorn"),
         "PEERGARDEN": ("src.trackers.UNIT3D.peergarden", "PeerGarden"),
         "POLISHTORRENT": ("src.trackers.UNIT3D.polishtorrent", "PolishTorrent"),
         "PORTUGAS": ("src.trackers.UNIT3D.portugas", "Portugas"),
         "PRIVATEHD": ("src.trackers.AVISTAZ.privatehd", "PrivateHD"),
         "PTCAFE": ("src.trackers.NEXUSPHP.ptcafe", "PTCafe"),
-        "PTERCLUB": ("src.trackers.pterclub", "PTerClub"),
+        "PTERCLUB": ("src.trackers.NEXUSPHP.pterclub", "PTerClub"),
         "PTFANS": ("src.trackers.NEXUSPHP.ptfans", "PTFans"),
         "PTGTK": ("src.trackers.NEXUSPHP.ptgtk", "PTGTK"),
-        "PTSKIT": ("src.trackers.ptskit", "Ptskit"),
+        "PTSKIT": ("src.trackers.NEXUSPHP.ptskit", "Ptskit"),
         "PTZONE": ("src.trackers.NEXUSPHP.ptzone", "PTZone"),
         "RACING4EVERYONE": ("src.trackers.UNIT3D.racing4everyone", "Racing4Everyone"),
         "RAILGUNPT": ("src.trackers.NEXUSPHP.railgunpt", "RailgunPT"),
@@ -1496,9 +1508,30 @@ tracker_class_map: Any = LazyTrackerDict(
         "VMF": ("src.trackers.UNIT3D.vietmediaf", "VietMediaF"),
         "XINGYUNGEPT": ("src.trackers.NEXUSPHP.xingyungept", "XingyungePT"),
         "YUSCENE": ("src.trackers.UNIT3D.yuscene", "YUSCENE"),
-        "ZENITH": ("src.trackers.UNIT3D.znth", "Zenith"),
+        "ZENITH": ("src.trackers.UNIT3D.zenith", "Zenith"),
     }
 )
+
+
+
+def _tracker_framework_from_module(module_name: str) -> str | None:
+    """Return the framework directory for a registered tracker module."""
+    parts = module_name.split(".")
+    if len(parts) < 4 or parts[:2] != ["src", "trackers"]:
+        return None
+    return parts[2]
+
+
+# Keep framework classification derived from the tracker registry without
+# importing tracker modules (the registry is intentionally lazy).
+tracker_framework_map: dict[str, str] = {
+    tracker: framework for tracker, (module_name, _class_name) in tracker_class_map._modules.items() if (framework := _tracker_framework_from_module(module_name)) is not None
+}
+
+
+def get_tracker_framework(tracker: str) -> str | None:
+    """Return the codebase framework for a tracker, if it has one."""
+    return tracker_framework_map.get(tracker.upper())
 
 
 

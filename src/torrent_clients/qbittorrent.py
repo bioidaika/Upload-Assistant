@@ -133,7 +133,7 @@ class QbittorrentClientMixin:
 
                     torrents = [TorrentInfo(torrent_properties)]
                 except Exception as e:
-                    logger.info(f"[yellow]Failed to get properties: {e}")
+                    logger.debug(f"[yellow]Failed to get properties: {e}")
                     return meta
         except TimeoutError:
             logger.info("[bold red]Getting torrents list timed out after retries")
@@ -151,7 +151,7 @@ class QbittorrentClientMixin:
         if not meta.uuid:
             meta.uuid = folder_id
 
-        extracted_torrent_dir = str(Path(meta.base_dir) / "tmp" / meta.uuid)
+        extracted_torrent_dir = str(Path(meta.base_dir) / "tmp" / meta.uuid / "torrents" / ".client")
         Path(extracted_torrent_dir).mkdir(parents=True, exist_ok=True)
 
         for torrent in torrents:
@@ -219,7 +219,7 @@ class QbittorrentClientMixin:
                                     logger.debug(f"[bold red]Validation failed for {torrent_file_path}")
                                     torrent_file_path.unlink()  # Remove invalid file
                                 else:
-                                    await TorrentCreator.create_base_from_existing_torrent(torrent_file_path, meta.base_dir, meta.uuid)
+                                    await TorrentCreator.create_base_from_existing_torrent(torrent_file_path, meta.base_dir, meta.uuid, meta.source_size)
                             except TimeoutError:
                                 logger.info(f"[bold red]Failed to export .torrent for {torrent_hash} after retries")
 
@@ -358,7 +358,11 @@ class QbittorrentClientMixin:
 
             if client.get("qbit_api_key"):
                 qbt_client = qbittorrentapi.Client(
-                    host=client["qbit_url"], port=client["qbit_port"], api_key=client["qbit_api_key"], VERIFY_WEBUI_CERTIFICATE=client.get("VERIFY_WEBUI_CERTIFICATE", True)
+                    host=client["qbit_url"],
+                    port=client["qbit_port"],
+                    api_key=client["qbit_api_key"],
+                    VERIFY_WEBUI_CERTIFICATE=client.get("VERIFY_WEBUI_CERTIFICATE", True),
+                    FORCE_SCHEME_FROM_HOST=True,
                 )
                 try:
                     await self.retry_qbt_operation(lambda: asyncio.to_thread(qbt_client.app_version), "qBittorrent API Key verification")
@@ -378,6 +382,7 @@ class QbittorrentClientMixin:
                     username=client.get("qbit_user"),
                     password=client.get("qbit_pass"),
                     VERIFY_WEBUI_CERTIFICATE=client.get("VERIFY_WEBUI_CERTIFICATE", True),
+                    FORCE_SCHEME_FROM_HOST=True,
                 )
                 try:
                     await self.retry_qbt_operation(lambda: asyncio.to_thread(qbt_client.auth_log_in), "qBittorrent login")
@@ -401,11 +406,13 @@ class QbittorrentClientMixin:
         qbt_client: qbittorrentapi.Client | None = None,
         qbt_session: httpx.AsyncClient | None = None,
         proxy_url: str | None = None,
-    ) -> str | None:
+        *,
+        collect_all: bool = False,
+    ) -> list[str] | str | None:
         logger.debug("[green]Searching qBittorrent for an existing .torrent")
 
         torrent_storage_dir = client.get("torrent_storage_dir")
-        extracted_torrent_dir = str(Path(meta.base_dir) / "tmp" / meta.uuid)
+        extracted_torrent_dir = str(Path(meta.base_dir) / "tmp" / meta.uuid / "torrents" / ".client")
 
         if not extracted_torrent_dir or extracted_torrent_dir.strip() == "tmp/":
             logger.info("[bold red]Invalid extracted torrent directory path. Check `meta.base_dir` and `meta.uuid`.")
@@ -583,6 +590,7 @@ class QbittorrentClientMixin:
             # **Step 2: Extract and Save .torrent Files**
             processed_hashes: set[str] = set()
             video_only_fallback: str | None = None
+            valid_hashes: list[str] = []
             torrent_hash: str | None = None
             for matching_torrent in matching_torrents:
                 try:
@@ -658,18 +666,26 @@ class QbittorrentClientMixin:
                 if valid:
                     if meta.subtitle_files and not self._torrent_includes_all_local_subtitles(str(torrent_file_path), meta):
                         if self._torrent_has_no_subtitles(str(torrent_file_path)):
-                            video_only_fallback = torrent_hash
-                            meta.base_reuse_torrent_path = str(torrent_path or torrent_file_path)
-                            logger.debug(f"[yellow]Keeping video-only torrent as fallback: {torrent_hash}")
+                            if collect_all:
+                                valid_hashes.append(torrent_hash)
+                            else:
+                                video_only_fallback = torrent_hash
+                                meta.base_reuse_torrent_path = str(torrent_path or torrent_file_path)
+                                logger.debug(f"[yellow]Keeping video-only torrent as fallback: {torrent_hash}")
                         else:
                             logger.debug(f"[yellow]Skipping partial-subtitle torrent as fallback: {torrent_hash}")
+                        continue
+                    if collect_all:
+                        valid_hashes.append(torrent_hash)
                         continue
                     logger.debug(f"[green]Returning first valid torrent: {torrent_hash}")
                     return torrent_hash
                 logger.debug(f"[bold red]{torrent_hash} failed validation")
                 torrent_file_path.unlink()
 
-            if video_only_fallback:
+            if collect_all:
+                result = valid_hashes
+            elif video_only_fallback:
                 logger.info(f"[yellow]No matching torrent with all local subtitles found; using video-only fallback: {video_only_fallback}")
                 result = video_only_fallback
             else:
@@ -837,7 +853,7 @@ class QbittorrentClientMixin:
                 logger.info("[bold red]Linking failed and fallback is disabled; aborting qBittorrent add")
                 return
         elif cross:
-            logger.info("[yellow]Cross seed requested, but no linking method is configured. Proceeding with original path naming.")
+            logger.info("[cyan]Using original content path for cross-seed (no linking required).[/cyan]")
 
         proxy_url = client.get("qui_proxy_url")
         qbt_client = None
@@ -999,7 +1015,10 @@ class QbittorrentClientMixin:
                 await qbt_session.aclose()
             return
 
-        logger.debug(f"[green]Successfully added torrent to qBittorrent ({tracker})[/green]")
+        if cross and not (use_symlink or use_hardlink):
+            logger.info(f"[green]{tracker}: Cross-seed added to qBittorrent using original content path.[/green]")
+        else:
+            logger.debug(f"[green]Successfully added torrent to qBittorrent ({tracker})[/green]")
 
         if not cross:
             try:
@@ -1624,7 +1643,7 @@ class QbittorrentClientMixin:
         if not meta.base_torrent_created:
             torrent_storage_dir = client_config.get("torrent_storage_dir")
 
-            extracted_torrent_dir = str(Path(meta.base_dir) / "tmp" / meta.uuid)
+            extracted_torrent_dir = str(Path(meta.base_dir) / "tmp" / meta.uuid / "torrents" / ".client")
             Path(extracted_torrent_dir).mkdir(parents=True, exist_ok=True)
 
             # Set up piece size preference logic
@@ -1675,7 +1694,7 @@ class QbittorrentClientMixin:
                     else:
                         # If piece preference is disabled, return first valid torrent
                         try:
-                            await TorrentCreator.create_base_from_existing_torrent(torrent_file_path, meta.base_dir, meta.uuid)
+                            await TorrentCreator.create_base_from_existing_torrent(torrent_file_path, meta.base_dir, meta.uuid, meta.source_size)
                             logger.debug(f"[green]Created BASE.torrent from first valid torrent: {torrent_hash}")
                             meta.base_torrent_created = True
                             meta.hash_used = torrent_hash
@@ -1736,7 +1755,7 @@ class QbittorrentClientMixin:
                             else:
                                 # If piece preference is disabled, return first valid torrent
                                 try:
-                                    await TorrentCreator.create_base_from_existing_torrent(alt_torrent_file_path, meta.base_dir, meta.uuid)
+                                    await TorrentCreator.create_base_from_existing_torrent(alt_torrent_file_path, meta.base_dir, meta.uuid, meta.source_size)
                                     logger.debug(f"[green]Created BASE.torrent from alternative torrent {alt_torrent_hash}")
                                     meta.infohash = alt_torrent_hash
                                     meta.base_torrent_created = True
@@ -1752,7 +1771,7 @@ class QbittorrentClientMixin:
 
                 if subtitle_fallback and not found_valid_torrent and not piece_size_best_match:
                     try:
-                        await TorrentCreator.create_base_from_existing_torrent(subtitle_fallback["torrent_path"], meta.base_dir, meta.uuid)
+                        await TorrentCreator.create_base_from_existing_torrent(subtitle_fallback["torrent_path"], meta.base_dir, meta.uuid, meta.source_size)
                         meta.infohash = subtitle_fallback["hash"]
                         meta.hash_used = subtitle_fallback["hash"]
                         meta.base_torrent_created = True
@@ -1769,7 +1788,7 @@ class QbittorrentClientMixin:
             if use_piece_preference and piece_size_best_match and not found_valid_torrent:
                 try:
                     logger.info(f"[green]Using best match torrent (16 MiB piece limit) with hash: {piece_size_best_match['hash']}")
-                    await TorrentCreator.create_base_from_existing_torrent(piece_size_best_match["torrent_path"], meta.base_dir, meta.uuid)
+                    await TorrentCreator.create_base_from_existing_torrent(piece_size_best_match["torrent_path"], meta.base_dir, meta.uuid, meta.source_size)
                     if meta.debug:
                         piece_size_mib = piece_size_best_match["piece_size"] / 1024 / 1024
                         logger.debug(f"[green]Created BASE.torrent from best match torrent: {piece_size_best_match['hash']} (piece size: {piece_size_mib:.1f} MiB)")

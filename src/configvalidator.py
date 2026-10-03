@@ -38,6 +38,7 @@ DEFAULT_KEY_TYPES: dict[str, tuple[type, ...]] = {
     "image_upload_concurrency": (str, int),
     "image_upload_delay": (str, float, int),
     "imgbb_api": (str,),
+    "catbox_userhash": (str,),
     "lostimg_api": (str,),
     "lensdump_api": (str,),
     "ptscreens_api": (str,),
@@ -57,9 +58,17 @@ DEFAULT_KEY_TYPES: dict[str, tuple[type, ...]] = {
     "max_menu_screens": (str, int),
     "thumbnail_size": (str, int),
     "frame_overlay": (bool,),
+    "overlay_text_size": (str, int),
+    "overlay_frame_number": (bool,),
+    "overlay_frame_type": (bool,),
+    "overlay_timestamp": (bool,),
+    "overlay_tonemapped": (bool,),
+    "overlay_position": (str,),
+    "overlay_layout": (str,),
     "tone_map": (bool,),
     "auto_dvd_menus": (bool,),
     "scale_screenshots_for_par": (bool,),
+    "scale_dvd_screenshots_for_par": (bool,),
     "use_libplacebo": (bool,),
     "ffmpeg_is_good": (bool,),
     "ffmpeg_warmup": (bool,),
@@ -117,7 +126,6 @@ DEFAULT_KEY_TYPES: dict[str, tuple[type, ...]] = {
     "bluray_image_size": (str, int),
     "bluray_score": (float, int),
     "bluray_single_score": (float, int),
-    "keep_meta": (bool,),
     "post_upload_hooks": (list, tuple),
     "post_upload_inprocess_hooks": (list, tuple),
     "post_upload_hook_timeout": (str, int, float),
@@ -133,6 +141,7 @@ DEFAULT_KEY_TYPES: dict[str, tuple[type, ...]] = {
     "google_books_api_key": (str,),
     "mam_api_key": (str,),
     "mam_id": (str,),
+    "ggn_api_key": (str,),
     "twitch_client_id": (str,),
     "twitch_client_secret": (str,),
     "upload_order": (str,),
@@ -142,6 +151,7 @@ DEFAULT_KEY_TYPES: dict[str, tuple[type, ...]] = {
     "qbit_bandwidth_time": (str, int),
     "music_enrichment_enabled": (bool,),
     "music_discogs_token": (str,),
+    "stats_enabled": (bool,),
     "metadata_cache_enabled": (bool,),
     "metadata_cache_dir": (str,),
     "metadata_cache_default_ttl_hours": (int,),
@@ -155,6 +165,7 @@ DEFAULT_KEY_TYPES: dict[str, tuple[type, ...]] = {
 
 # Valid image hosts
 VALID_IMAGE_HOSTS = [
+    "catbox",
     "imgbb",
     "imgbox",
     "pixhost",
@@ -212,8 +223,10 @@ USENET_KEY_TYPES: dict[str, tuple[type, ...]] = {
     "archive_password": (str,),
     "par2_percentage": (str, int),
     "obscure_subject": (bool,),
+    "pesto_obfuscation_mode": (str,),
     "usenet_uploader": (str,),
     "pesto_check": (bool,),
+    "pesto_season_upload": (bool,),
     "pesto_check_delay": (str, int),
     "pesto_check_retries": (str, int),
     "pesto_check_connections": (str, int),
@@ -376,7 +389,7 @@ def validate_config(config: Any, active_trackers: list[str] | None = None, activ
                 is_usenet_tracker_active = True
                 break
     except ImportError:
-        if any(ut in trackers_upper for ut in ("CURUPIRA", "SUIO", "DRUNKENSLUG", "NZBGEEK")):
+        if any(ut in trackers_upper for ut in ("CURUPIRA", "SUIO", "DRUNKENSLUG", "NZBGEEK", "NZBNEST")):
             is_usenet_tracker_active = True
 
     if "USENET" in config_dict:
@@ -566,6 +579,19 @@ def _validate_default_section(default: dict[str, Any]) -> tuple[list[str], list[
             )
         )
 
+    for key, choices in {"overlay_position": ("left", "right"), "overlay_layout": ("stacked", "single_line")}.items():
+        if key in default and default[key] not in choices:
+            warnings.append(ConfigValidationWarning(f"Must be one of: {', '.join(choices)}", key=key, section="DEFAULT"))
+
+    if "overlay_text_size" in default:
+        try:
+            text_size = int(str(default["overlay_text_size"]))
+        except ValueError:
+            warnings.append(ConfigValidationWarning("Must be an integer from 1 to 100", key="overlay_text_size", section="DEFAULT"))
+        else:
+            if not 1 <= text_size <= 100:
+                warnings.append(ConfigValidationWarning("Value must be between 1 and 100", key="overlay_text_size", section="DEFAULT"))
+
     # Validate image hosts
     for i in range(1, 10):
         host_key = f"img_host_{i}"
@@ -715,6 +741,7 @@ def _validate_trackers_section(trackers: dict[str, Any], active_trackers: list[s
             "sticky",
             "exclusive",
             "exact_match_only",
+            "force_rehost_images",
         ]
         for field in bool_fields:
             if field in tracker_config_dict:
@@ -725,6 +752,22 @@ def _validate_trackers_section(trackers: dict[str, Any], active_trackers: list[s
                     )
 
         # Check integer fields
+        list_fields = [
+            "image_tag_whitelist",
+            "image_tag_blacklist",
+        ]
+        for field in list_fields:
+            if field in tracker_config_dict:
+                value = tracker_config_dict[field]
+                if not isinstance(value, list) or any(not isinstance(tag, str) or not tag.strip() for tag in value):
+                    warnings.append(
+                        ConfigValidationWarning(
+                            f"'{field}' must be a list of non-empty strings, got {type(value).__name__}: {value!r}",
+                            key=tracker_name,
+                            section="TRACKERS",
+                        )
+                    )
+
         int_fields = [
             "freeleech_until",
             "double_upload_until",
@@ -816,6 +859,16 @@ def _validate_usenet_section(usenet: dict[str, Any], is_usenet_active: bool = Fa
                     int(value)
                 except ValueError:
                     warnings.append(ConfigValidationWarning(f"Cannot parse '{value}' as integer", key=key, section="USENET"))
+
+    pesto_obfuscation_mode = str(usenet.get("pesto_obfuscation_mode", "full")).strip().lower()
+    if pesto_obfuscation_mode not in {"full", "light", "article", "full-shared"}:
+        warnings.append(
+            ConfigValidationWarning(
+                "Must be one of: full, light, article, full-shared",
+                key="pesto_obfuscation_mode",
+                section="USENET",
+            )
+        )
 
     return errors, warnings
 
