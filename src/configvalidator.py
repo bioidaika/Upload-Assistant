@@ -27,6 +27,8 @@ DEFAULT_KEY_TYPES: dict[str, tuple[type, ...]] = {
     "update_notification": (bool,),
     "verbose_notification": (bool,),
     "update_notification_cache_hours": (str, int, float),
+    "webui_keep_uploads_on_disconnect": (bool,),
+    "webui_unattended_prompt_timeout": (str, int, float),
     "tmdb_api": (str,),
     "tvdb_api": (str,),
     "tvdb_token": (str,),
@@ -178,6 +180,7 @@ VALID_IMAGE_HOSTS = [
     "passtheimage",
     "seedpool_cdn",
     "sharex",
+    "thrimg",
     "utppm",
     "lostimg",
     "",
@@ -196,6 +199,7 @@ IMAGE_HOST_API_KEYS: dict[str, str] = {
     "sharex": "sharex_api_key",
     "zipline": "zipline_api_key",
     "midnightscene": "midnightscene_api_key",
+    "thrimg": "thrimg_api",
     "utppm": "utppm_api",
     # imgbox and pixhost don't require API keys
 }

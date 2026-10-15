@@ -28,6 +28,14 @@ python upload.py "/path/to/media" --webui 127.0.0.1:5000
 
 Open <http://127.0.0.1:5000> in a browser. The address defaults to `127.0.0.1:5000`; include `HOST:PORT` only when overriding it.
 
+### Screenshot mode
+
+To capture the current interface for documentation, sign in normally and open the Upload page with `?screenshot=1`, for example `http://127.0.0.1:5000/?screenshot=1`.
+
+This browser-only demo shows the fictional **The Automation Menace (1968)** release with frozen FFmpeg, mkbrr, Usenet, spectrogram, and HDR progress. It does not start an upload, run external tools, load your files or tracker configuration, or send API actions. Existing uploads in other tabs continue normally. Authentication is still required.
+
+Use **Choose poster** and **Choose backdrop** to select your fictional artwork (PNG, JPEG, or WebP, up to 4 MiB per image). The backdrop appears behind the poster. Both images stay in your browser and are remembered there independently when storage is available. The demo includes ten subtitle languages with different flags. Choose the theme and resize the panels normally, then click **Hide controls (H)** before taking the screenshot. Press **H** outside a text field to bring the controls back. **Exit demo**, or removing the query parameter, returns to the normal app.
+
 ### Browse roots
 
 Browse roots define the parts of the filesystem visible in the File Browser. They do not grant access to unrelated directories.
@@ -106,6 +114,16 @@ The File Browser lists only content inside the configured browse roots. Use it t
 
 Normal browsing shows non-hidden files and folders inside the permitted roots so that video, disc, book, game, ISO, and other supported upload types remain available. The separate description-file picker is limited to `.txt`, `.nfo`, and `.md` files.
 
+Listings and searches omit dot-prefixed entries, Windows entries marked Hidden or System, and known system folders such as `$RECYCLE.BIN` and `System Volume Information`. Searches do not descend into those folders.
+
+You can also type or paste paths into **Upload paths** on desktop or mobile. Use server paths, one file or folder per line. Enter adds a line; use the execution button to start. One path runs individually, and multiple paths create a WebUI queue. Blank lines and duplicate paths are ignored, surrounding quotes are accepted, and each queue item can have its own arguments. The limit is 1,000 paths per upload.
+
+The server validates the complete selection before starting, and reports the invalid item (or original text line). Paths must exist inside the configured browse roots. Upload folders are inspected for escaping file links and reject directory links and Windows junctions. Local description, comparison, disc menu, poster and banner paths also use the permitted roots. Additional content paths belong in the path field, not in Additional Arguments.
+
+For text queues, paste their paths into **Upload paths** instead of selecting a `.txt` or `.log` queue file. Only temporary queues issued by the running WebUI are accepted outside the content roots; their contents are checked for modifications and their items are revalidated by the upload process. Ordinary CLI queue handling is unchanged. These checks constrain WebUI inputs; OS permissions remain the boundary against concurrent filesystem changes by other server processes or users.
+
+File browsing has no hourly or daily request quota. Folder listings and recursive searches use minute-based limits, while listing the configured roots is exempt. See [Request limits](#request-limits) for the allowances used throughout the WebUI.
+
 #### Custom root order
 
 Choose **Custom** in **Sort by**, then choose **Reorder**. Drag root folders into position or use the movement controls. The list previews its new position while dragging. Choose **Done** when finished; the ordering controls are hidden outside reorder mode. **Reset** clears the saved custom ordering.
@@ -137,6 +155,26 @@ After selecting content and reviewing the command:
 4. Answer prompts with the input controls shown at the bottom of the output panel.
 
 The WebUI runs the upload controller in an isolated subprocess so that **Kill** can stop its process tree and interactive input can be forwarded to it.
+
+### Upload tabs
+
+The tab bar above the workspace runs several uploads side by side; for example, an unattended queue in one tab while you prepare other uploads in another. Choose **+** to open a tab; you can prepare many uploads this way. Each tab has its own selection, arguments, output, and prompts. A tab's status dot shows whether it is idle, running, scheduled, waiting for another tab, waiting for your input, finished, or failed. Once metadata is found, the tab is named after the release: `Title (2024)` for films, `Title S01E02` or `Title S01` for series, `Artist – Album` for music, and `Author – Title` for books; queues add the current position, such as `[3/12]`. Until then it shows the file or folder name. Hover over a tab to see the full release name. Closing a running tab asks for confirmation and kills its process. When only one tab is open, its **×** resets it instead: the upload is killed (or a scheduled one cancelled) and the tab starts over empty.
+
+The same content cannot run in two tabs at once, and at most four uploads run at the same time. When all four slots are busy, **Execute Upload** becomes **Schedule Upload**: the upload is checked and queued on the server, and starts automatically, oldest first, as soon as a slot frees, even if no browser is open. A scheduled tab shows **Cancel** instead of **Kill**. Scheduling requires `webui_keep_uploads_on_disconnect`; with it disabled, the button is unavailable until a slot frees.
+
+Tabs you have prepared but not started are saved in the browser, so they come back after a reload together with the running, scheduled, and finished uploads from the server. They are saved per browser, not on the server.
+
+Heavy work is shared between tabs one at a time, so parallel tabs do not overload the machine or the Usenet provider: torrent hashing (mkbrr/torf), Usenet archive and PAR2 creation, Usenet posting, screenshot capture, and BDInfo scans. When two tabs need the same resource, the upload that started first goes first, and the other tab shows **Waiting** until the resource is free. The same limits apply to CLI runs started while the WebUI is busy.
+
+qBittorrent bandwidth control works the same way across tabs; see [Upload Order and qBittorrent Bandwidth Control](upload-order-and-bandwidth-control.md#multiple-concurrent-uploads).
+
+### Leaving the page
+
+Uploads keep running on the server when you close the browser tab, reload the page, or lose the connection (for example when a phone locks its screen). Open the WebUI again, from any browser signed in to it, and each running or recently finished upload reappears in its own tab. Missed output is replayed, and a pending prompt can still be answered. If the connection drops while the page stays open, the tab reconnects by itself.
+
+A finished upload stays available until you close its tab, clear it, or start another upload in it; finished uploads are also dropped after 24 hours or when their slot is needed for a new upload. Closing a running tab still kills its upload.
+
+An upload left waiting at a prompt with no browser connected is killed after `webui_unattended_prompt_timeout` minutes (60 by default), so it cannot hold shared resources indefinitely. Set `webui_keep_uploads_on_disconnect` to `False` to restore the previous behaviour, where closing or disconnecting a tab kills its upload. See [`DEFAULT` options](example-config.md#ux--safety-toggles). Restarting the WebUI server still stops every upload.
 
 ## Monitoring and reviewing a run
 
@@ -285,6 +323,29 @@ Open **Configuration → Access Log** to manage:
 The blacklist takes precedence over the whitelist. Repeated failed API access attempts may add the source IP to the blacklist. Review IP changes carefully so that you do not lock out the device or reverse proxy used to administer the WebUI.
 
 The local account, encrypted credentials, token metadata, 2FA state, IP controls, and access-log level are stored in `webui_auth.json`. Access events are written to `access_log.log` in the same application configuration directory. The generated `session_secret` is also stored there unless `SESSION_SECRET` or `SESSION_SECRET_FILE` overrides it.
+
+### Request limits
+
+The WebUI limits request frequency to slow repeated sign-in attempts and protect server resources. Requests are counted separately for each endpoint and client IP; there is no single shared allowance for the whole WebUI. Most explicitly limited API endpoints also keep separate counters for authenticated and unauthenticated requests. Browsers or devices sharing a client IP can share an allowance.
+
+| Operation                                                                                     | Request limit                    |
+| --------------------------------------------------------------------------------------------- | -------------------------------- |
+| Routes without an explicit override, including config saves and most administration actions   | 50 per hour and 200 per day      |
+| Sign-in and recovery pages (`/login` and `/login/recovery`), including page loads and submits | 10 per minute and 100 per day    |
+| Health checks and configured browse-root listing                                              | Exempt                           |
+| Folder listings                                                                               | 600 per minute                   |
+| Recursive file searches                                                                       | 60 per minute                    |
+| External-tool status checks                                                                   | 60 per hour                      |
+| Tracker reachability refreshes, Prowlarr tests, and torrent-client connection tests           | 30 per hour for each endpoint    |
+| Tracker API-key status checks                                                                 | 120 per hour                     |
+| Live preview, screenshot listing, local screenshot images, and generated-description reads    | 7,200 per hour for each endpoint |
+| Start an upload or save an upload queue                                                       | 100 per hour for each endpoint   |
+| Send input to an upload process                                                               | 200 per hour                     |
+| Stop an upload process                                                                        | 50 per hour                      |
+
+An explicit limit replaces the default hourly and daily quotas. The higher allowance for live review applies to the read endpoints; editing descriptions or screenshots still uses the default limits. Each background refresh, folder listing, or configuration save counts as a request. One **Save Config** batch counts as one request regardless of the number of fields edited.
+
+Exceeding a limit returns HTTP 429. Allow the relevant minute, hour, or day window to expire before retrying. These counters are held in memory and reset when the WebUI process restarts. IP blacklisting after repeated authentication failures is a separate protection; see [IP controls and access logging](#ip-controls-and-access-logging).
 
 ## Statistics
 
