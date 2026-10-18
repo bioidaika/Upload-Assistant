@@ -441,7 +441,15 @@ async def imdb_tvdb(meta: Meta, filename: str, tvdb_handler: Any, tmdb_manager: 
         tmdb_tuple = cast(tuple[Any, Any, Any, Any], tmdb_result)
         if len(tmdb_tuple) == 4:
             category, tmdb_id, original_language, filename_search = tmdb_tuple
-            meta.category = category
+            # Prevent TMDB from overriding TV → MOVIE when filename patterns
+            # (e.g. S01E05, S05, Season 1) already confidently detected TV.
+            if meta.category_from_filename and meta.category == "TV" and category == "MOVIE":
+                logger.info(
+                    "[yellow]TMDB returned MOVIE but filename patterns indicate TV "
+                    f"(category_from_filename=True). Keeping category as TV.[/yellow]"
+                )
+            else:
+                meta.category = category
             meta.tmdb_id = tmdb_id
             meta.original_language = original_language
             meta.no_ids = filename_search

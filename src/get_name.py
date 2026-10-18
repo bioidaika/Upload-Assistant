@@ -541,6 +541,9 @@ class NameManager:
                 return title, None, year
 
         folder_name = Path(meta.uuid).name if meta.uuid else ""
+        # Strip bracketed CJK content (e.g. [吸血鬼日记 第五季]) to avoid polluting TMDB search
+        folder_name = re.sub(r"\[[^\]]*[\u4e00-\u9fff\u3400-\u4dbf\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af\uf900-\ufaff][^\]]*\]", "", folder_name)
+        folder_name = re.sub(r"^[\.\-_ ]+", "", folder_name)  # clean leading separators after stripping
         logger.debug(f"[cyan]Extracting title and year from folder name: {folder_name}[/cyan]")
         # lets do some subsplease handling
         if "subsplease" in folder_name.lower():

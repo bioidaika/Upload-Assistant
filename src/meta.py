@@ -96,6 +96,7 @@ class Meta:
     cast: list[str] = field(default_factory=list)
     category_id: str | None = None
     category: str = ""
+    category_from_filename: bool = False
     channels: str = ""
     clean_name: str = ""
     cleanup: bool = False
