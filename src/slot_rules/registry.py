@@ -22,6 +22,7 @@ from src.slot_rules.trackers.lst import LstSlotRules
 from src.slot_rules.trackers.luminarr import LuminarrSlotRules
 from src.slot_rules.trackers.simple import DreadVaultSlotRules, MTeamSlotRules, SeedpoolSlotRules, TorrentLeechSlotRules
 from src.slot_rules.trackers.ulcx import UlcxSlotRules
+from src.slot_rules.trackers.vietmediaf import VietMediaFSlotRules
 from src.slot_rules.trackers.webproviders import HomieHelpDeskSlotRules, SkipTheCommercialsSlotRules
 
 SLOT_RULES: dict[str, type[SlotRules]] = {
@@ -46,6 +47,7 @@ SLOT_RULES: dict[str, type[SlotRules]] = {
         SkipTheCommercialsSlotRules,
         TorrentLeechSlotRules,
         UlcxSlotRules,
+        VietMediaFSlotRules,
     )
 }
 

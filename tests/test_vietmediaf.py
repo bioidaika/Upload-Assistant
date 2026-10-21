@@ -52,6 +52,7 @@ def test_vietmediaf_profile_uses_canonical_identity_and_unit3d_endpoints():
     assert vietmediaf.search_url == "https://tracker.vietmediaf.store/api/torrents/filter"
     assert vietmediaf.upload_url == "https://tracker.vietmediaf.store/api/torrents/upload"
     assert vietmediaf.torrent_url == "https://tracker.vietmediaf.store/torrents/"
+    assert vietmediaf.search_max_retries == -1
 
 
 def test_vietmediaf_is_registered_as_unit3d_api_tracker_with_comment_host():
@@ -356,4 +357,81 @@ def test_vietmediaf_mod_queue_payload_honors_config_and_meta_override():
     assert asyncio.run(tracker(modq=True).get_additional_data(Meta())) == {"mod_queue_opt_in": "1"}
     assert asyncio.run(tracker(modq=False).get_additional_data(Meta(modq=True))) == {"mod_queue_opt_in": "1"}
     assert asyncio.run(tracker(modq=False).get_additional_data(Meta())) == {"mod_queue_opt_in": "0"}
+
+
+def test_vietmediaf_slot_rules_separate_original_vie_and_dub_slots():
+    from src.slot_rules.models import Verdict
+    from src.slot_rules.profile import H264, WEBDL, ReleaseProfile
+    from src.slot_rules.trackers.vietmediaf import VietMediaFSlotRules
+
+    upload_vie = ReleaseProfile(
+        name="Movie.2024.ViE.1080p.AMZN.WEB-DL.DDP5.1.H.264-GRP",
+        resolution="1080p",
+        kind=WEBDL,
+        codec=H264,
+    )
+    existing_orig = ReleaseProfile(
+        name="Movie.2024.1080p.AMZN.WEB-DL.DDP5.1.H.264-OLD",
+        resolution="1080p",
+        kind=WEBDL,
+        codec=H264,
+    )
+    existing_vie = ReleaseProfile(
+        name="Movie.2024.ViE.1080p.AMZN.WEB-DL.DDP5.1.H.264-OTHER",
+        resolution="1080p",
+        kind=WEBDL,
+        codec=H264,
+    )
+    rules = VietMediaFSlotRules()
+
+    # Upload ViE when only Original is on site -> Allowed
+    decision = rules.evaluate(upload_vie, [existing_orig])
+    assert decision is not None
+    assert decision.verdict == Verdict.ALLOW
+    assert "ViE" in decision.slot
+
+    # Upload ViE when another ViE is on site -> Blocked
+    decision_blocked = rules.evaluate(upload_vie, [existing_vie])
+    assert decision_blocked is not None
+    assert decision_blocked.verdict == Verdict.BLOCK
+
+    # Upload ViE DUB when ViE and Original are on site -> Allowed
+    upload_dub = ReleaseProfile(
+        name="Movie.2024.ViE.DUB.1080p.AMZN.WEB-DL.DDP5.1.H.264-GRP",
+        resolution="1080p",
+        kind=WEBDL,
+        codec=H264,
+    )
+    decision_dub = rules.evaluate(upload_dub, [existing_orig, existing_vie])
+    assert decision_dub is not None
+    assert decision_dub.verdict == Verdict.ALLOW
+    assert "ViE DUB" in decision_dub.slot
+
+
+def test_vietmediaf_dupe_checker_excludes_mismatched_audio_tags():
+    from src.dupe_checking import DupeChecker
+
+    checker = DupeChecker({"DEFAULT": {}, "TRACKERS": {"VIETMEDIAF": {}}})
+    meta_vie = Meta(
+        name="Movie.2024.ViE.1080p.AMZN.WEB-DL.DDP5.1.H.264-GRP",
+        resolution="1080p",
+        type="WEBDL",
+        category="MOVIE",
+        video_codec="H.264",
+        video_encode="AVC",
+    )
+    dupes = [
+        {"name": "Movie.2024.1080p.AMZN.WEB-DL.DDP5.1.H.264-OLD", "size": "2 GB", "res": "1080p", "type": "WEBDL"},
+        {"name": "Movie.2024.ViE.DUB.1080p.AMZN.WEB-DL.DDP5.1.H.264-DUB", "size": "2.1 GB", "res": "1080p", "type": "WEBDL"},
+    ]
+    # Existing Original and ViE DUB should be excluded when upload is ViE
+    filtered = asyncio.run(checker.filter_dupes(dupes, meta_vie, "VIETMEDIAF"))
+    assert len(filtered) == 0
+
+    # But existing ViE should NOT be excluded
+    dupes_with_vie = [
+        {"name": "Movie.2024.ViE.1080p.AMZN.WEB-DL.DDP5.1.H.264-OLD", "size": "2 GB", "res": "1080p", "type": "WEBDL"},
+    ]
+    filtered_vie = asyncio.run(checker.filter_dupes(dupes_with_vie, meta_vie, "VIETMEDIAF"))
+    assert len(filtered_vie) == 1
 

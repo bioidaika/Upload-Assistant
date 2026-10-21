@@ -638,6 +638,22 @@ class DupeChecker:
                     meta.filename_match = f"{entry.get('name')} = {entry.get('link', None)}"
                     return False
 
+            if tracker_name == "VIETMEDIAF":
+                from src.trackers.UNIT3D.vietmediaf import VietMediaF
+
+                upload_audio_tag = VietMediaF._existing_audio_tag(meta.name or "") or VietMediaF._existing_audio_tag(meta.clean_name or "")
+                if upload_audio_tag is None and hasattr(VietMediaF, "_metadata_audio_tag"):
+                    upload_audio_tag = VietMediaF._metadata_audio_tag(meta)
+
+                entry_audio_tag = VietMediaF._existing_audio_tag(each)
+                # Releases with different audio categories (Original, ViE, ViE DUB) belong to separate slots and do not dupe each other
+                if upload_audio_tag != entry_audio_tag:
+                    await log_exclusion(
+                        f"VietMediaF audio tag mismatch (upload={upload_audio_tag or 'Original'} vs existing={entry_audio_tag or 'Original'})",
+                        each,
+                    )
+                    return True
+
             if tracker_name in ["BEYONDHD", "RETROFLIX", "ALPHARATIO"] and (
                 ("2160p" in target_resolution and "2160p" in each) and ("framestor" in each.lower() or "framestor" in meta.uuid.lower())
             ):

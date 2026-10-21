@@ -268,3 +268,49 @@ def test_disc_detected_by_upload_type_id_when_mapping_has_no_disc(monkeypatch: p
     asyncio.run(tracker.search_existing(Meta(category="MOVIE", tmdb=123, resolution="1080p", type="DISC", is_disc="BDMV")))
 
     assert any(call.endswith("/9") for call in calls)  # noqa: S101
+
+
+def test_search_existing_retries_on_rate_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    attempts: list[int] = []
+
+    class RetryFakeResponse:
+        def __init__(self, status_code: int, headers: dict[str, str] | None = None) -> None:
+            self.status_code = status_code
+            self.headers = headers or {}
+
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> dict[str, list[object]]:
+            return {"data": []}
+
+    class RetryClient:
+        def __init__(self, **_kwargs: Any) -> None:
+            pass
+
+        async def __aenter__(self) -> RetryClient:
+            return self
+
+        async def __aexit__(self, *_args: Any) -> None:
+            pass
+
+        async def get(self, *, url: str, headers: dict[str, str], params: list[tuple[str, Any]]) -> RetryFakeResponse:
+            _ = (url, headers, params)
+            attempts.append(len(attempts) + 1)
+            if len(attempts) < 3:
+                return RetryFakeResponse(429, {"Retry-After": "0.01"})
+            return RetryFakeResponse(200)
+
+    monkeypatch.setattr("src.trackers.UNIT3D.httpx.AsyncClient", RetryClient)
+
+    async def immediate_sleep(_delay: float) -> None:
+        return
+
+    monkeypatch.setattr("src.trackers.UNIT3D.asyncio.sleep", immediate_sleep)
+
+    tracker = Aither({"DEFAULT": {}, "TRACKERS": {"AITHER": {"api_key": "test-key", "search_max_retries": 5}}})
+    meta = Meta(category="TV", tmdb=123, season="S01", resolution="1080p", type="WEBDL")
+
+    dupes = asyncio.run(tracker.search_existing(meta))
+    assert dupes == []  # noqa: S101
+    assert len(attempts) == 3  # noqa: S101

@@ -41,6 +41,8 @@ class UNIT3D:
     # gets only the upload's type and resolution; slot rules get the whole title
     # through ``meta["<TRACKER>_title_releases"]``.
     search_whole_title: bool = False
+    # Max retries for duplicate search (-1 means infinite retry).
+    search_max_retries: int = 1
 
     def __init__(self, config: dict[str, Any], tracker_name: str):
         self.config = config
@@ -148,13 +150,92 @@ class UNIT3D:
         missing_details: list[dict[str, Any]] = []
         disc_type_ids: list[set[str]] = []
         title_releases: list[dict[str, Any]] = []
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-            for url, params, check_pending in urls_to_check:
-                logger.debug(f"{self.tracker}: Searching URL: {url} with params: {params} (pending={check_pending})")
-                response = await client.get(url=url, headers=headers, params=params)
-                response.raise_for_status()
+        # Max retries for duplicate search: negative (-1) means infinite retry.
+        default_search_retries = getattr(self, "search_max_retries", 1)
+        raw_search_retries = self.tracker_config.get("search_max_retries", default_search_retries)
+        try:
+            if isinstance(raw_search_retries, str):
+                if raw_search_retries.strip().lower() in ("inf", "infinite", "unlimited", "-1"):
+                    search_max_retries = -1
+                else:
+                    search_max_retries = int(raw_search_retries)
+            elif isinstance(raw_search_retries, (int, float)):
+                search_max_retries = int(raw_search_retries)
+            else:
+                search_max_retries = 1
+        except (ValueError, TypeError):
+            search_max_retries = 1
 
-                if response.status_code == 200:
+        async with httpx.AsyncClient(timeout=25.0, follow_redirects=True) as client:
+            for url, params, check_pending in urls_to_check:
+                attempt = 0
+                response: httpx.Response | None = None
+                while True:
+                    attempt += 1
+                    try:
+                        logger.debug(f"{self.tracker}: Searching URL: {url} with params: {params} (pending={check_pending}, attempt={attempt})")
+                        response = await client.get(url=url, headers=headers, params=params)
+
+                        if response.status_code == 429:
+                            retry_after_str = response.headers.get("Retry-After")
+                            try:
+                                delay = max(1.0, float(retry_after_str)) if retry_after_str else 5.0
+                            except (ValueError, TypeError):
+                                delay = 5.0
+
+                            if search_max_retries < 0 or attempt < search_max_retries:
+                                max_label = "infinite" if search_max_retries < 0 else str(search_max_retries)
+                                logger.warning(
+                                    f"{self.tracker}: [yellow]Rate limit (429) hit during duplicate search. "
+                                    f"Retrying in {delay:.1f}s... (attempt {attempt}/{max_label})[/yellow]"
+                                )
+                                await asyncio.sleep(delay)
+                                continue
+                            response.raise_for_status()
+
+                        response.raise_for_status()
+                        break
+                    except httpx.HTTPStatusError as e:
+                        if e.response.status_code in (401, 403, 404, 422):
+                            # Non-retryable authentication, missing endpoint, or validation errors
+                            raise
+                        if e.response.status_code == 429:
+                            # 429 after exceeding max retries
+                            raise
+                        if search_max_retries < 0 or attempt < search_max_retries:
+                            delay = min(5.0 * min(attempt, 6), 30.0)
+                            max_label = "infinite" if search_max_retries < 0 else str(search_max_retries)
+                            logger.warning(
+                                f"{self.tracker}: [yellow]HTTP {e.response.status_code} during duplicate search. "
+                                f"Retrying in {delay:.1f}s... (attempt {attempt}/{max_label})[/yellow]"
+                            )
+                            await asyncio.sleep(delay)
+                            continue
+                        raise
+                    except httpx.TimeoutException:
+                        if search_max_retries < 0 or attempt < search_max_retries:
+                            delay = 5.0
+                            max_label = "infinite" if search_max_retries < 0 else str(search_max_retries)
+                            logger.warning(
+                                f"{self.tracker}: [yellow]Request timed out during duplicate search. "
+                                f"Retrying in {delay:.1f}s... (attempt {attempt}/{max_label})[/yellow]"
+                            )
+                            await asyncio.sleep(delay)
+                            continue
+                        raise
+                    except httpx.RequestError as e:
+                        if search_max_retries < 0 or attempt < search_max_retries:
+                            delay = 5.0
+                            max_label = "infinite" if search_max_retries < 0 else str(search_max_retries)
+                            logger.warning(
+                                f"{self.tracker}: [yellow]Network connection error ({e}) during duplicate search. "
+                                f"Retrying in {delay:.1f}s... (attempt {attempt}/{max_label})[/yellow]"
+                            )
+                            await asyncio.sleep(delay)
+                            continue
+                        raise
+
+                if response is not None and response.status_code == 200:
                     data = response.json()
                     self.observe_api_key_expiry(meta, response, data)
                     for each in data.get("data", []):
