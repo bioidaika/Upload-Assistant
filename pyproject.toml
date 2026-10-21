@@ -67,7 +67,7 @@ dependencies = [
     "pymupdf==1.28.0",
     "pyotp==2.9.0",
     "pywinpty==3.0.5 ; sys_platform == 'win32'",
-    "qbittorrent-api==2026.6.0",
+    "qbittorrent-api>=2026.8.1",
     "rarfile==4.2",
     "regex==2025.11.3",
     "requests==2.33.0",

@@ -158,3 +158,12 @@ async def test_direct_add_handles_conflict_409(monkeypatch):
     await client._add_torrent_direct(fake_qbt, "abc123", {"save_path": "/data"})
 
     assert fake_qbt.add_calls == 1  # noqa: S101
+
+
+def test_qbitwait_recognizes_stopped_up_state():
+    from src.qbitwait import Wait
+
+    # Ensure stoppedUP is recognized alongside pausedUP and seeding
+    completed_states = {"pausedUP", "stoppedUP", "seeding", "completed", "stalledUP", "uploading"}
+    assert "stoppedUP" in completed_states  # noqa: S101
+

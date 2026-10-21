@@ -132,7 +132,7 @@ class Wait:
                     state_str = str(state_value) if state_value is not None else "unknown"
                     logger.info(f"[DEBUG] Torrent {infohash} state: {state_str}", extra={"markup": False})
 
-                    if state_str in {"pausedUP", "seeding", "completed", "stalledUP", "uploading"}:
+                    if state_str in {"pausedUP", "stoppedUP", "seeding", "completed", "stalledUP", "uploading"}:
                         logger.info(f"[INFO] Torrent {infohash} has completed!", extra={"markup": False})
                         return
                 else:
@@ -398,7 +398,7 @@ class Wait:
             logger.info(f"[green]Recheck completed. State: {final_state}, Progress: {final_progress * 100:.2f}%[/green]")
             meta.we_rechecked_torrent = True
 
-            if final_state not in {"pausedUP", "seeding", "completed", "stalledUP", "uploading"}:
+            if final_state not in {"pausedUP", "stoppedUP", "seeding", "completed", "stalledUP", "uploading"}:
                 logger.info("[yellow]Torrent needs to download missing data. Waiting for completion...[/yellow]")
                 await self.wait_for_completion(torrent_hash, check_interval)
 

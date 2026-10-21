@@ -99,7 +99,7 @@ pytest-asyncio==1.4.0
 python-dateutil==2.9.0.post0
 pywin32-ctypes==0.2.3 ; sys_platform == 'win32'
 pywinpty==3.0.5 ; sys_platform == 'win32'
-qbittorrent-api==2026.6.0
+qbittorrent-api>=2026.8.1
 rarfile==4.2
 rebulk==6.0.1
 regex==2025.11.3

@@ -934,8 +934,11 @@ class QbittorrentClientMixin:
                 data = {
                     "savepath": save_path,
                     "autoTMM": str(auto_management).lower(),
+                    # Backward compatibility for qBittorrent < 5.0 and forward compatibility for >= 5.0 / 5.3
                     "skip_checking": str(skip_checking).lower(),
+                    "seedMode": str(skip_checking).lower(),
                     "paused": str(paused_on_add).lower(),
+                    "stopped": str(paused_on_add).lower(),
                     "contentLayout": content_layout,
                 }
                 if qbt_category:
@@ -943,7 +946,7 @@ class QbittorrentClientMixin:
                 if tag:
                     data["tags"] = tag
                 logger.debug(
-                    f"[cyan]POSTing to {Redaction.redact_private_info(qbt_proxy_url)}/api/v2/torrents/add with data: savepath={save_path}, autoTMM={auto_management}, skip_checking={skip_checking}, paused={paused_on_add}, contentLayout={content_layout}, category={qbt_category}, tags={tag}"
+                    f"[cyan]POSTing to {Redaction.redact_private_info(qbt_proxy_url)}/api/v2/torrents/add with data: savepath={save_path}, autoTMM={auto_management}, skip_checking={skip_checking}, seedMode={skip_checking}, paused={paused_on_add}, stopped={paused_on_add}, contentLayout={content_layout}, category={qbt_category}, tags={tag}"
                 )
 
                 await self._add_torrent_via_proxy(qbt_session, qbt_proxy_url, torrent.infohash, data, files)
@@ -955,9 +958,12 @@ class QbittorrentClientMixin:
                     "save_path": save_path,
                     "use_auto_torrent_management": auto_management,
                     "is_skip_checking": skip_checking,
+                    "seed_mode": skip_checking,
+                    "seedMode": skip_checking,
                     "is_paused": paused_on_add,
                     "is_stopped": paused_on_add,
                     "paused": paused_on_add,
+                    "stopped": paused_on_add,
                     "content_layout": content_layout,
                     "category": qbt_category,
                     "tags": tag,
