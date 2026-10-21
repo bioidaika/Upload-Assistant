@@ -1441,6 +1441,7 @@ const trackerNameMap = {
   SUIO: "Suio",
   UTOPIA: "UTOPIA",
   VIETMEDIAF: "VietMediaF",
+  VULTU: "vultu",
   XINGYUNGEPT: "XingyungePT",
   YUSCENE: "YUSCENE",
   ZENITH: "Zenith",
