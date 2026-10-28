@@ -407,7 +407,13 @@ class VietMediaF(UNIT3D):
                     f"has single Vietnamese audio while your upload has dual TM+LT. Marked as trumpable![/bold green]"
                 )
 
-    async def search_torrents(self, meta: Meta) -> list[dict[str, Any]]:
-        dupes = await super().search_torrents(meta)
+    async def search_existing(self, meta: Meta) -> list[dict[str, Any]]:
+        dupes = await super().search_existing(meta)
         self._apply_vietnamese_trump_rules(meta, dupes)
+        title_releases = meta.get(f"{self.tracker}_title_releases")
+        if isinstance(title_releases, list):
+            self._apply_vietnamese_trump_rules(meta, title_releases)
         return dupes
+
+    async def search_torrents(self, meta: Meta) -> list[dict[str, Any]]:
+        return await self.search_existing(meta)

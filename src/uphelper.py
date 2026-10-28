@@ -628,16 +628,37 @@ class UploadHelper:
             logger.info(f"[green]{tracker_name}: uploading, slot rules allow this release.[/green]")
             if meta.unattended_auto:
                 trumpable_dupes = [entry for entry in dupes_list if isinstance(entry, dict) and entry.get("trumpable")]
-                if trumpable_dupes or meta.trumpable_id:
+                # Fallback: slot_decision detected a trump opportunity (e.g. Vietnamese subtitles/audio)
+                # even when search_existing didn't mark entries as trumpable (compatibility layer).
+                has_slot_trump = bool(
+                    slot_decision
+                    and slot_decision.conflicts
+                    and (
+                        "replace" in (slot_decision.reason or "").lower()
+                        or "vietnamese" in (slot_decision.why or "").lower()
+                        or "adds" in (slot_decision.why or "").lower()
+                    )
+                )
+                if trumpable_dupes or meta.trumpable_id or has_slot_trump:
                     meta.were_trumping = True
+                    conflict_id = (
+                        slot_decision.conflicts[0].get("id")
+                        if has_slot_trump and slot_decision and slot_decision.conflicts
+                        else None
+                    )
                     if not meta.get(f"{tracker_name}_trumpable_id"):
                         meta[f"{tracker_name}_trumpable_id"] = (
                             (trumpable_dupes[0].get("id") if trumpable_dupes else None)
                             or meta.trumpable_id
+                            or conflict_id
                             or meta.get(f"{tracker_name}_matched_id", None)
                         )
                     if trumpable_dupes and trumpable_dupes[0].get("trump_reason"):
                         meta.trump_reason = trumpable_dupes[0].get("trump_reason")
+                    elif has_slot_trump and "subtitle" in (slot_decision.why or "").lower():
+                        meta.trump_reason = "missing_vietnamese_subtitles"
+                    elif has_slot_trump and "audio" in (slot_decision.why or "").lower():
+                        meta.trump_reason = "missing_dual_vietnamese_audio"
                     elif meta.filename_match and meta.file_count_match:
                         meta.trump_reason = "exact_match"
                     else:

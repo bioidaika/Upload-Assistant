@@ -16,6 +16,7 @@ class DupeEntry(TypedDict, total=False):
     files: list[str]
     file_count: int
     trumpable: bool
+    trump_reason: str | None
     link: str | None
     download: str | None
     flags: list[str]
@@ -102,6 +103,7 @@ class DupeChecker:
                     "files": [],
                     "file_count": 0,
                     "trumpable": bool(d.get("trumpable", False)),
+                    "trump_reason": d.get("trump_reason", None),
                     "link": d.get("link", None),
                     "download": d.get("download", None),
                     "flags": d.get("flags", []),
@@ -163,7 +165,7 @@ class DupeChecker:
         target_source = str(meta.source)
         is_sd = int(meta.sd or 0)
         is_tv_pack = meta.category == "TV" and (coerce_int(meta.tv_pack) or 0) == 1
-        target_season_match = re.search(r"[sS](\d+)", str(target_season or ""))
+        target_season_match = re.search(r"[sS]?(\d+)", str(target_season or ""))
         target_season_number = int(target_season_match.group(1)) if target_season_match else None
 
         filenames: list[str] = []
@@ -555,9 +557,10 @@ class DupeChecker:
                 return False
 
             # AITHER / VIETMEDIAF trumping logic - no internal checking, if it's marked trumpable, it's trumpable
-            if tracker_name in ["AITHER", "LST", "VIETMEDIAF"] and entry.get("trumpable", False) and res_id and target_resolution == res_id:
-                meta.trumpable_id = entry.get("id")
-                remember_match("trumpable_id")
+            if tracker_name in ["AITHER", "LST", "VIETMEDIAF"] and entry.get("trumpable", False):
+                if not res_id or not target_resolution or target_resolution == res_id or (res_id in target_resolution or target_resolution in str(res_id)):
+                    meta.trumpable_id = entry.get("id")
+                    remember_match("trumpable_id")
 
             if not meta.is_disc:
                 for file in filenames:
@@ -965,7 +968,7 @@ class DupeChecker:
         """
         Check if the filename matches the given season and episode.
         """
-        season_match = re.search(r"[sS](\d+)", str(target_season))
+        season_match = re.search(r"[sS]?(\d+)", str(target_season))
         target_season_value = int(season_match.group(1)) if season_match else None
 
         # Handle daily-style episodes where the episode value is a date (YYYY-MM-DD / YYYY.MM.DD).
