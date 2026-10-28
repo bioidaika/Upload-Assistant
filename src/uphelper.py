@@ -603,9 +603,26 @@ class UploadHelper:
 
         elif meta.dupe is not False:
             upload = True
-        elif meta.unattended_auto and (
+        elif meta.unattended_auto and slot_verdict is not Verdict.BLOCK and (
             (trumpable_text and (meta.trumpable_id or (meta.season_pack_contains_episode and meta.get(f"{tracker_name}_matched_episode_ids", []))))
-            or (meta.filename_match and meta.file_count_match and tracker_name in ["AITHER", "LST", "VIETMEDIAF"])
+            or (
+                meta.filename_match
+                and meta.file_count_match
+                and tracker_name in ["AITHER", "LST", "VIETMEDIAF"]
+                and (
+                    meta.trumpable_id
+                    or any(isinstance(entry, dict) and entry.get("trumpable") for entry in dupes_list)
+                    or (
+                        slot_decision
+                        and slot_decision.conflicts
+                        and (
+                            "replace" in (slot_decision.reason or "").lower()
+                            or "vietnamese" in (slot_decision.why or "").lower()
+                            or "adds" in (slot_decision.why or "").lower()
+                        )
+                    )
+                )
+            )
         ):
             upload = True
             meta.were_trumping = True

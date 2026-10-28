@@ -547,3 +547,24 @@ async def test_vietmediaf_unattended_auto_trump(monkeypatch: pytest.MonkeyPatch)
     assert meta_out_b.were_trumping is True
     assert meta_out_b.trump_reason == "missing_vietnamese_subtitles"
     assert meta_out_b.get("VIETMEDIAF_trumpable_id") == 12345
+
+
+    # With -uaa and Verdict.BLOCK (exact dupe on site): must NOT trump and must skip upload
+    decision_block = SlotDecision(
+        verdict=Verdict.BLOCK,
+        reason="This exact release is already on the site.",
+        tracker="VIETMEDIAF",
+        rules_date=date(2026, 10, 28),
+        conflicts=[{"id": 99999, "name": "Exact.Movie.1080p-GRP"}],
+    )
+    meta_block = Meta(
+        unattended=True,
+        unattended_auto=True,
+        dupe=False,
+        filename_match="Exact.Movie.1080p = link",
+        file_count_match=1,
+    )
+    exact_dupes = [{"id": 99999, "name": "Exact.Movie.1080p-GRP", "trumpable": False}]
+    is_dupe_c, meta_out_c = await helper.dupe_check(exact_dupes, meta_block, "VIETMEDIAF", decision_block)
+    assert is_dupe_c is True
+    assert meta_out_c.were_trumping is False

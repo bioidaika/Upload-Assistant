@@ -2995,6 +2995,11 @@ async def do_the_thing(base_dir: str) -> None:
             logger.debug(f"Uploads processed in {finish_time - start_time:.4f} seconds")
 
             for tracker in meta.trumping_trackers:
+                status_map = meta.tracker_status or {}
+                tracker_status_info = status_map.get(tracker, {})
+                if not tracker_status_info.get("upload") or not tracker_status_info.get("torrent_id"):
+                    logger.debug(f"{tracker}: Skipping trump report because upload was not successful.")
+                    continue
                 logger.info(f"[yellow]Submitting trumpable report to {tracker}.....")
                 await tracker_setup.make_trumpable_report(meta, tracker)
 
