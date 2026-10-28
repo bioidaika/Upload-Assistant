@@ -346,7 +346,10 @@ class SeasonEpisodeManager:
                 logger.info(f"[cyan]  {i + 1:2d}. {Path(file).name}")
             files_shown = min(batch_size, len(filelist))
             if unattended:
-                if missing_list:
+                if meta.unattended_auto and missing_list:
+                    meta.season_pack_incomplete = True
+                    logger.info("[yellow]Unattended auto mode (-uaa): INCOMPLETE marker was automatically added for missing episodes.[/yellow]")
+                elif missing_list:
                     logger.info("[yellow]Unattended mode: continuing without confirmation; no INCOMPLETE marker was added.")
                 else:
                     logger.info("[yellow]Unattended mode: continuing despite unexpected episode numbers (no confirmation).")

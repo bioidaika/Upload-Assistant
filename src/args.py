@@ -1056,6 +1056,7 @@ class Args:
             default=0,
         )
         parser.add_argument("-ua", "--unattended", action="store_true", required=False, help=argparse.SUPPRESS)
+        parser.add_argument("-uaa", "--unattended_auto", action="store_true", required=False, help=argparse.SUPPRESS)
         parser.add_argument("-uac", "--unattended_confirm", action="store_true", required=False, help=argparse.SUPPRESS)
         parser.add_argument("-vs", "--vapoursynth", action="store_true", required=False, help="Use vapoursynth for screens (requires vs install)")
         parser.add_argument(
@@ -1406,6 +1407,9 @@ class Args:
                 meta[key] = meta.get(key)
             # if key == 'help' and value == True:
             # parser.print_help()
+
+        if meta.unattended_auto:
+            meta.unattended = True
 
         if parsed_args.get("archive_password"):
             meta.usenet_archive_password_is_random = str(meta.archive_password).lower() == "random"

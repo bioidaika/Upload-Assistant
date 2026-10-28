@@ -287,4 +287,5 @@ See [Upload Order and qBittorrent Bandwidth Control](upload-order-and-bandwidth-
 These are suppressed from help output:
 
 - `-ua`, `--unattended`: Doesn't prompt for anything. Will default to skipping a tracker related upload, instead of prompting a question. Use only if you know what you are doing, and are familar with any Upload Assistant quirks.
+- `-uaa`, `--unattended_auto`: Unattended mode with automatic trumping (defaulting comparison screenshots to description) and automatic INCOMPLETE marker for TV packs when missing episodes are detected.
 - `-uac`, `--unattended_confirm`: Requires `-ua`. Unattended mode with some prompting.

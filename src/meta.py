@@ -553,6 +553,7 @@ class Meta:
     ua_signature: str = ""
     uhd: str | bool = False
     unattended_audio_skip: bool = False
+    unattended_auto: bool = False
     unattended_confirm: bool = False
     unattended_subtitle_skip: bool = False
     unattended: bool = False

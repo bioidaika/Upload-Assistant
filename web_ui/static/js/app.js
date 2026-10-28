@@ -1296,6 +1296,11 @@ let argumentCategories = [
         description: "Unattended (no prompts (AT ALL))",
       },
       {
+        label: "--unattended_auto",
+        description:
+          "Unattended auto (auto-trump, screenshots in description, auto-incomplete)",
+      },
+      {
         label: "--unattended_confirm",
         description:
           "Unattended confirm (use with --unattended, some prompting)",

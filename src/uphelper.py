@@ -516,8 +516,14 @@ class UploadHelper:
                             meta.we_asked = True
                             meta.were_trumping = True
                             if not meta.get(f"{tracker_name}_trumpable_id"):
-                                meta[f"{tracker_name}_trumpable_id"] = meta.get(f"{tracker_name}_matched_id", None)
-                            if meta.filename_match and meta.file_count_match:
+                                meta[f"{tracker_name}_trumpable_id"] = (
+                                    (trumpable_dupes[0].get("id") if trumpable_dupes else None)
+                                    or meta.trumpable_id
+                                    or meta.get(f"{tracker_name}_matched_id", None)
+                                )
+                            if trumpable_dupes and trumpable_dupes[0].get("trump_reason"):
+                                meta.trump_reason = trumpable_dupes[0].get("trump_reason")
+                            elif meta.filename_match and meta.file_count_match:
                                 meta.trump_reason = "exact_match"
                             else:
                                 meta.trump_reason = "trumpable_release"
@@ -549,7 +555,11 @@ class UploadHelper:
                                 meta.were_trumping = True
                                 meta.trump_reason = "exact_match"
                                 if not meta.get(f"{tracker_name}_trumpable_id"):
-                                    meta[f"{tracker_name}_trumpable_id"] = meta.get(f"{tracker_name}_matched_id", None)
+                                    meta[f"{tracker_name}_trumpable_id"] = (
+                                    (trumpable_dupes[0].get("id") if trumpable_dupes else None)
+                                    or meta.trumpable_id
+                                    or meta.get(f"{tracker_name}_matched_id", None)
+                                )
                         else:
                             upload = await self.prompt_yes_no(f"Upload to {tracker_name} anyway?", default=False)
                             meta.we_asked = True
@@ -593,9 +603,46 @@ class UploadHelper:
 
         elif meta.dupe is not False:
             upload = True
+        elif meta.unattended_auto and (
+            (trumpable_text and (meta.trumpable_id or (meta.season_pack_contains_episode and meta.get(f"{tracker_name}_matched_episode_ids", []))))
+            or (meta.filename_match and meta.file_count_match and tracker_name in ["AITHER", "LST", "VIETMEDIAF"])
+        ):
+            upload = True
+            meta.were_trumping = True
+            trumpable_dupes = [entry for entry in dupes_list if isinstance(entry, dict) and entry.get("trumpable")]
+            if not meta.get(f"{tracker_name}_trumpable_id"):
+                meta[f"{tracker_name}_trumpable_id"] = (
+                    (trumpable_dupes[0].get("id") if trumpable_dupes else None)
+                    or meta.trumpable_id
+                    or meta.get(f"{tracker_name}_matched_id", None)
+                )
+            if trumpable_dupes and trumpable_dupes[0].get("trump_reason"):
+                meta.trump_reason = trumpable_dupes[0].get("trump_reason")
+            elif meta.filename_match and meta.file_count_match:
+                meta.trump_reason = "exact_match"
+            else:
+                meta.trump_reason = "trumpable_release"
+            logger.info(f"[bold green]{tracker_name}: Unattended auto mode (-uaa) enabled, automatically trumping release (reason: {meta.trump_reason}).[/bold green]")
         elif slot_verdict is Verdict.ALLOW:
             # Unattended: a tracker with slot rules decides; REVIEW keeps the basic result.
             logger.info(f"[green]{tracker_name}: uploading, slot rules allow this release.[/green]")
+            if meta.unattended_auto:
+                trumpable_dupes = [entry for entry in dupes_list if isinstance(entry, dict) and entry.get("trumpable")]
+                if trumpable_dupes or meta.trumpable_id:
+                    meta.were_trumping = True
+                    if not meta.get(f"{tracker_name}_trumpable_id"):
+                        meta[f"{tracker_name}_trumpable_id"] = (
+                            (trumpable_dupes[0].get("id") if trumpable_dupes else None)
+                            or meta.trumpable_id
+                            or meta.get(f"{tracker_name}_matched_id", None)
+                        )
+                    if trumpable_dupes and trumpable_dupes[0].get("trump_reason"):
+                        meta.trump_reason = trumpable_dupes[0].get("trump_reason")
+                    elif meta.filename_match and meta.file_count_match:
+                        meta.trump_reason = "exact_match"
+                    else:
+                        meta.trump_reason = "trumpable_release"
+                    logger.info(f"[bold green]{tracker_name}: Unattended auto mode (-uaa) enabled, automatically trumping release (reason: {meta.trump_reason}).[/bold green]")
             upload = True
         else:
             if slot_verdict is Verdict.BLOCK:

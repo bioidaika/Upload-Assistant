@@ -1074,6 +1074,12 @@ async def process_meta(meta: Meta, base_dir: str) -> bool:
         if str(ua).lower() == "true":
             meta.unattended = True
             logger.info("[yellow]Running in Auto Mode")
+    if not meta.unattended_auto:
+        uaa = config["DEFAULT"].get("unattended_auto", False)
+        if str(uaa).lower() == "true":
+            meta.unattended_auto = True
+            meta.unattended = True
+            logger.info("[yellow]Running in Unattended Auto Mode (-uaa)")
     prep = Prep(screens=meta.screens, img_host=meta.imghost, config=config, publish_preview=_publish_webui_preview_target)
     try:
         meta = await prep.gather_prep(meta=meta, mode="cli")

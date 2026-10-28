@@ -505,3 +505,45 @@ def test_vietmediaf_slot_rules_trumps_when_upload_adds_vietnamese_subs():
     assert "adds Vietnamese subtitles" in decision.why
 
 
+
+
+def test_vietmediaf_incomplete_pack_naming():
+    from src.trackers.naming import add_incomplete_pack_marker, INCOMPLETE_PACK_TRACKERS
+
+    assert "VIETMEDIAF" in INCOMPLETE_PACK_TRACKERS
+    meta = Meta(category="TV", tv_pack=True, season="1", season_pack_incomplete=True)
+    orig_name = "Loki.S01.1080p.DSNP.WEB-DL.DDP5.1.Atmos.H.264-FLUX"
+    new_name = add_incomplete_pack_marker(orig_name, meta, "VIETMEDIAF")
+    assert "S01.INCOMPLETE" in new_name or "S01 INCOMPLETE" in new_name
+
+
+@pytest.mark.asyncio
+async def test_vietmediaf_unattended_auto_trump(monkeypatch: pytest.MonkeyPatch):
+    from src.uphelper import UploadHelper
+    from src.slot_rules.models import SlotDecision, Verdict
+    from datetime import date
+
+    helper = UploadHelper({"DEFAULT": {"trackers": "VIETMEDIAF"}, "TRACKERS": {"VIETMEDIAF": {"api_key": "dummy"}}})
+    monkeypatch.setattr(helper, "_show_slot_decision", lambda *args, **kwargs: None)
+
+    dupes = [{
+        "id": 12345,
+        "name": "Movie.2024.1080p.BluRay.DTS-HD.MA.5.1-GRP",
+        "trumpable": True,
+        "trump_reason": "missing_vietnamese_subtitles"
+    }]
+    decision = SlotDecision(verdict=Verdict.ALLOW, reason="Slot allows trump", tracker="VIETMEDIAF", rules_date=date(2026, 10, 28), why="vietmediaf_trump")
+
+    # With -ua alone: no trump report flagged
+    meta_ua = Meta(unattended=True, unattended_auto=False, dupe=False, trumpable_id=12345)
+    is_dupe, meta_out = await helper.dupe_check(dupes, meta_ua, "VIETMEDIAF", decision)
+    assert is_dupe is False
+    assert meta_out.were_trumping is False
+
+    # With -uaa: auto-trump flagged and metadata populated
+    meta_uaa = Meta(unattended=True, unattended_auto=True, dupe=False, trumpable_id=12345)
+    is_dupe_b, meta_out_b = await helper.dupe_check(dupes, meta_uaa, "VIETMEDIAF", decision)
+    assert is_dupe_b is False
+    assert meta_out_b.were_trumping is True
+    assert meta_out_b.trump_reason == "missing_vietnamese_subtitles"
+    assert meta_out_b.get("VIETMEDIAF_trumpable_id") == 12345

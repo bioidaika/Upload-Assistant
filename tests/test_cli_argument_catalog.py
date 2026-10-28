@@ -39,7 +39,7 @@ def test_webui_grouped_flags_exist_in_cli() -> None:
     assert "--ptp" not in grouped_flags
     assert "Other CLI options" in source
     for item in re.findall(r'\{[^{}]*label: "(--[^\"]+)"[^{}]*\}', categories):
-        if item not in {"--unattended", "--unattended_confirm"}:
+        if item not in {"--unattended", "--unattended_auto", "--unattended_confirm"}:
             block = re.search(r'\{[^{}]*label: "' + re.escape(item) + r'"[^{}]*\}', categories)
             assert block is not None and "description:" not in block.group()
 

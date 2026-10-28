@@ -1154,6 +1154,11 @@ class TrackerSetup:
                         logger.info(f"  [bold green]Already being trumped by:[/bold green] {torrent_name} (ID: {torrent_id})")
                 else:
                     logger.info("  [yellow]The trumping torrent for this report seems to be in modq.....[/yellow]")
+            if meta.unattended:
+                logger.info(f"[bold yellow]{tracker}: Unattended mode - existing trump report found. Skipping upload to {tracker}.[/bold yellow]")
+                if tracker not in meta.skip_upload_trackers:
+                    meta.skip_upload_trackers.append(tracker)
+                return False
             try:
                 upload = cli_ui.ask_yes_no("Do you want to proceed with the upload anyway?", default=False)
             except EOFError, KeyboardInterrupt:
@@ -1170,6 +1175,10 @@ class TrackerSetup:
             logger.debug(f"[bold green]Will make a trumpable report for this upload at {tracker}[/bold green]")
 
         if not meta.tv_pack:
+            if meta.unattended_auto:
+                logger.info(f"[bold green]{tracker}: Unattended auto mode (-uaa) enabled, automatically using comparison screenshots in description for trump report.[/bold green]")
+                meta.screenshots_in_description = True
+                return True
             logger.info(f"[yellow]{tracker} requires comparisons to be provided for trump reports.\nAre the comparison images in the description or are you adding links?")
             try:
                 where_compare = cli_ui.ask_string("Enter 'd' if in description, 'L' if you want to paste links, or press Enter to skip trumping:", default="")
@@ -1384,11 +1393,14 @@ class TrackerSetup:
 
         else:
             if not meta.tv_pack:
-                try:
-                    user_message = cli_ui.ask_string("Enter a reason for the trump report on LST:")
-                except EOFError, KeyboardInterrupt:
-                    logger.info("[yellow]Prompt cancelled; no additional message provided.[/yellow]")
+                if meta.unattended:
                     user_message = None
+                else:
+                    try:
+                        user_message = cli_ui.ask_string("Enter a reason for the trump report on LST:")
+                    except EOFError, KeyboardInterrupt:
+                        logger.info("[yellow]Prompt cancelled; no additional message provided.[/yellow]")
+                        user_message = None
                 message = message + ": " + user_message if user_message else message + ": No additional message provided by user"
             message = message + ": https://lst.gg/torrents/" + str(trumping_torrent_id)
             payload: JsonDict = {"message": message}
