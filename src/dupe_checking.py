@@ -554,8 +554,8 @@ class DupeChecker:
                 logger.debug(f"[cyan]Book duplicate matched: {each}")
                 return False
 
-            # AITHER-specific trumping logic - no internal checking, if it's marked trumpable, it's trumpable
-            if tracker_name in ["AITHER", "LST"] and entry.get("trumpable", False) and res_id and target_resolution == res_id:
+            # AITHER / VIETMEDIAF trumping logic - no internal checking, if it's marked trumpable, it's trumpable
+            if tracker_name in ["AITHER", "LST", "VIETMEDIAF"] and entry.get("trumpable", False) and res_id and target_resolution == res_id:
                 meta.trumpable_id = entry.get("id")
                 remember_match("trumpable_id")
 
@@ -740,8 +740,8 @@ class DupeChecker:
                 season_episode_match, is_season = await DupeChecker.is_season_episode_match(normalized, target_season, target_episode)
                 logger.debug(f"[debug] Season/Episode match result: {season_episode_match}")
                 logger.debug(f"[debug] is_season: {is_season}")
-                # AITHER episode trumping logic
-                if is_season and tracker_name in ["AITHER", "LST"]:
+                # AITHER / VIETMEDIAF episode trumping logic
+                if is_season and tracker_name in ["AITHER", "LST", "VIETMEDIAF"]:
                     # Null-safe normalization for comparisons
                     target_source_lower = (target_source or "").lower()
                     type_id_lower = (type_id or "").lower()

@@ -310,7 +310,7 @@ class TrackerStatusManager:
                             if cross_seed_key in local_meta and cross_seed_value:
                                 meta[cross_seed_key] = cross_seed_value
 
-                        if tracker_name in ["AITHER", "LST"]:
+                        if tracker_name in ["AITHER", "LST", "VIETMEDIAF"]:
                             were_trumping = local_meta.get("were_trumping", False)
                             trump_reason = local_meta.get("trump_reason")
                             trumpable_id_after_dupe_check = local_meta.get(f"{tracker_name}_trumpable_id")

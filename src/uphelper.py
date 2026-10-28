@@ -541,7 +541,7 @@ class UploadHelper:
                 if meta.filename_match and meta.file_count_match:
                     logger.info(f"[bold red]Exact match found! - {meta.filename_match}[/bold red]")
                     try:
-                        if tracker_name in ["AITHER", "LST"]:
+                        if tracker_name in ["AITHER", "LST", "VIETMEDIAF"]:
                             logger.info(f"[yellow]{tracker_name} supports automatic trumping of exact matches, if the file is allowed to be trumped.[/yellow]")
                             upload = await self.prompt_yes_no(f"Are you trumping this exact match on {tracker_name}?", default=False)
                             if upload:

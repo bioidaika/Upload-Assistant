@@ -1364,6 +1364,10 @@ class TrackerSetup:
             message = f"{meta.ua_name} season pack trump"
         elif meta.trump_reason == "exact_match":
             message = f"{meta.ua_name} exact filename trump"
+        elif meta.trump_reason == "missing_vietnamese_subtitles":
+            message = f"{meta.ua_name} trump: release adds Vietnamese subtitles"
+        elif meta.trump_reason == "missing_dual_vietnamese_audio":
+            message = f"{meta.ua_name} trump: release adds dual Vietnamese audio (TM+LT)"
         elif meta.trump_reason == "trumpable_release":
             message = f"{meta.ua_name} trumpable release trump"
         else:

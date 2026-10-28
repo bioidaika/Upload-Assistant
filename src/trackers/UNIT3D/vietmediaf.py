@@ -3,6 +3,7 @@ import re
 import unicodedata
 from typing import Any, cast
 
+from src.console import logger
 from src.meta import Meta
 from src.trackers.UNIT3D import UNIT3D
 
@@ -18,6 +19,7 @@ class VietMediaF(UNIT3D):
     upload_url = f"{base_url}/api/torrents/upload"
     requests_url = f"{base_url}/api/requests/filter"
     search_url = f"{base_url}/api/torrents/filter"
+    trumping_url = f"{base_url}/api/trumping-reports/filter"
     torrent_url = f"{base_url}/torrents/"
     supported_categories = ("MOVIE", "TV")
     tracker_urls = (base_url,)
@@ -275,3 +277,137 @@ class VietMediaF(UNIT3D):
 
     async def get_additional_data(self, meta: Meta) -> dict[str, str]:
         return {"mod_queue_opt_in": await self.get_flag(meta, "modq")}
+
+    def _wants_torrent_details(self, meta: Meta) -> bool:
+        if meta.category in ("MOVIE", "TV"):
+            return True
+        return super()._wants_torrent_details(meta)
+
+    @classmethod
+    def _entry_audio_slot(cls, entry: dict[str, Any]) -> str:
+        name = str(entry.get("name") or "")
+        tag = cls._existing_audio_tag(name)
+        if tag == "dub":
+            return "ViE DUB"
+        if tag == "vie":
+            return "ViE"
+        return "Original"
+
+    @classmethod
+    def _meta_audio_slot(cls, meta: Meta) -> str:
+        tag = cls._existing_audio_tag(meta.name or "") or cls._metadata_audio_tag(meta)
+        if tag == "dub":
+            return "ViE DUB"
+        if tag == "vie":
+            return "ViE"
+        return "Original"
+
+    @classmethod
+    def _has_vietnamese_subtitles_meta(cls, meta: Meta) -> bool:
+        raw_subs = meta.subtitle_languages or []
+        subs = [raw_subs] if isinstance(raw_subs, str) else raw_subs
+        for sub in subs:
+            if not isinstance(sub, str):
+                continue
+            norm = cls._normalized_words(sub)
+            if cls._vietnamese_language_tokens.intersection(norm.split()) or "tieng viet" in norm:
+                return True
+
+        mediainfo = meta.mediainfo
+        if isinstance(mediainfo, dict):
+            media = mediainfo.get("media")
+            if isinstance(media, dict):
+                tracks = media.get("track", [])
+                if isinstance(tracks, list):
+                    for track in tracks:
+                        if not isinstance(track, dict):
+                            continue
+                        if str(track.get("@type", "")).casefold() == "text":
+                            for k in ("Language", "Title", "language", "title"):
+                                val = track.get(k)
+                                if isinstance(val, str) and val.strip():
+                                    norm = cls._normalized_words(val)
+                                    if cls._vietnamese_language_tokens.intersection(norm.split()) or "tieng viet" in norm:
+                                        return True
+        return False
+
+    @classmethod
+    def _has_vietnamese_subtitles_entry(cls, entry: dict[str, Any]) -> bool:
+        raw_subs = entry.get("subtitle_languages") or []
+        subs = [raw_subs] if isinstance(raw_subs, str) else raw_subs
+        if isinstance(subs, (list, tuple, set, frozenset)):
+            for sub in subs:
+                norm = cls._normalized_words(str(sub))
+                if cls._vietnamese_language_tokens.intersection(norm.split()) or "tieng viet" in norm:
+                    return True
+
+        name = str(entry.get("name") or "")
+        if re.search(r"(?i)\b(?:vietsub|subviet)\b", name):
+            return True
+
+        media_info = str(entry.get("media_info") or "")
+        if media_info:
+            text_sections = re.findall(r"Text(?: #\d+)?\s*\n(.*?)(?=\n\n(?:Audio|Video|Text|Menu)|$)", media_info, re.DOTALL | re.IGNORECASE)
+            for sec in text_sections:
+                sec_norm = cls._normalized_words(sec)
+                if any(t in sec_norm for t in ("vietnamese", "tieng viet")):
+                    return True
+        return False
+
+    @classmethod
+    def _has_dual_vietnamese_audio_meta(cls, meta: Meta) -> bool:
+        normalized_titles = [cls._normalized_words(title) for title in cls._extract_audio_titles(meta)]
+        has_dub = any(pattern.search(title) for title in normalized_titles for pattern in cls._dub_title_tokens)
+        has_vie = any(pattern.search(title) for title in normalized_titles for pattern in cls._voice_over_title_tokens)
+        return has_dub and has_vie
+
+    @classmethod
+    def _has_dual_vietnamese_audio_entry(cls, entry: dict[str, Any]) -> bool:
+        media_info = str(entry.get("media_info") or "")
+        if not media_info:
+            return False
+        audio_sections = re.findall(r"Audio(?: #\d+)?\s*\n(.*?)(?=\n\n(?:Audio|Video|Text|Menu)|$)", media_info, re.DOTALL | re.IGNORECASE)
+        has_dub = False
+        has_vie = False
+        for sec in audio_sections:
+            sec_norm = cls._normalized_words(sec)
+            if any(pattern.search(sec_norm) for pattern in cls._dub_title_tokens):
+                has_dub = True
+            elif any(pattern.search(sec_norm) for pattern in cls._voice_over_title_tokens):
+                has_vie = True
+        return has_dub and has_vie
+
+    def _apply_vietnamese_trump_rules(self, meta: Meta, dupes: list[dict[str, Any]]) -> None:
+        upload_slot = self._meta_audio_slot(meta)
+        has_vi_sub_upload = self._has_vietnamese_subtitles_meta(meta)
+        has_dual_vi_upload = self._has_dual_vietnamese_audio_meta(meta)
+
+        for entry in dupes:
+            if not isinstance(entry, dict):
+                continue
+            entry_slot = self._entry_audio_slot(entry)
+            # Phuong an A: Only check trumping within the exact same slot
+            if upload_slot != entry_slot:
+                continue
+
+            # 1. Subtitle trumping within same slot
+            if has_vi_sub_upload and not self._has_vietnamese_subtitles_entry(entry):
+                entry["trumpable"] = True
+                entry["trump_reason"] = "missing_vietnamese_subtitles"
+                logger.info(
+                    f"[bold green]{self.tracker}: Torrent {entry.get('id')} ({entry.get('name')}) "
+                    f"lacks Vietnamese subtitles while your upload includes them. Marked as trumpable![/bold green]"
+                )
+            # 2. Dual audio trumping within ViE / ViE DUB slots
+            elif upload_slot in ("ViE", "ViE DUB") and has_dual_vi_upload and not self._has_dual_vietnamese_audio_entry(entry):
+                entry["trumpable"] = True
+                entry["trump_reason"] = "missing_dual_vietnamese_audio"
+                logger.info(
+                    f"[bold green]{self.tracker}: Torrent {entry.get('id')} ({entry.get('name')}) "
+                    f"has single Vietnamese audio while your upload has dual TM+LT. Marked as trumpable![/bold green]"
+                )
+
+    async def search_torrents(self, meta: Meta) -> list[dict[str, Any]]:
+        dupes = await super().search_torrents(meta)
+        self._apply_vietnamese_trump_rules(meta, dupes)
+        return dupes

@@ -435,3 +435,73 @@ def test_vietmediaf_dupe_checker_excludes_mismatched_audio_tags():
     filtered_vie = asyncio.run(checker.filter_dupes(dupes_with_vie, meta_vie, "VIETMEDIAF"))
     assert len(filtered_vie) == 1
 
+
+def test_vietmediaf_trumping_rule_subtitles_same_slot():
+    vmf = tracker()
+    meta_upload = Meta(
+        name="Movie.2024.1080p.AMZN.WEB-DL.DDP5.1.H.264-GRP",
+        resolution="1080p",
+        category="MOVIE",
+        subtitle_languages=["vi"],
+    )
+    dupes = [
+        {
+            "id": 1001,
+            "name": "Movie.2024.1080p.AMZN.WEB-DL.DDP5.1.H.264-OLD",
+            "media_info": "Text #1\nLanguage : English\n",
+            "trumpable": False,
+        }
+    ]
+    vmf._apply_vietnamese_trump_rules(meta_upload, dupes)
+    assert dupes[0]["trumpable"] is True
+    assert dupes[0]["trump_reason"] == "missing_vietnamese_subtitles"
+
+
+def test_vietmediaf_trumping_does_not_trump_different_audio_slot():
+    vmf = tracker()
+    # Upload is ViE (Voice-over), tracker is Original -> different slot, should NOT trump
+    meta_upload = Meta(
+        name="Movie.2024.ViE.1080p.AMZN.WEB-DL.DDP5.1.H.264-GRP",
+        resolution="1080p",
+        category="MOVIE",
+        subtitle_languages=["vi"],
+    )
+    dupes = [
+        {
+            "id": 1002,
+            "name": "Movie.2024.1080p.AMZN.WEB-DL.DDP5.1.H.264-OLD",
+            "media_info": "Text #1\nLanguage : English\n",
+            "trumpable": False,
+        }
+    ]
+    vmf._apply_vietnamese_trump_rules(meta_upload, dupes)
+    assert dupes[0]["trumpable"] is False
+
+
+def test_vietmediaf_slot_rules_trumps_when_upload_adds_vietnamese_subs():
+    from src.slot_rules.trackers.vietmediaf import VietMediaFSlotRules
+    from src.slot_rules.models import Verdict
+    from src.slot_rules.profile import ReleaseProfile, WEBDL, H264
+
+    rules = VietMediaFSlotRules(Meta(category="MOVIE"))
+    upload = ReleaseProfile(
+        name="Movie.2024.1080p.AMZN.WEB-DL.DDP5.1.H.264-NEW",
+        resolution="1080p",
+        kind=WEBDL,
+        codec=H264,
+        subtitle_languages=frozenset({"vi", "en"}),
+    )
+    existing = ReleaseProfile(
+        name="Movie.2024.1080p.AMZN.WEB-DL.DDP5.1.H.264-OLD",
+        resolution="1080p",
+        kind=WEBDL,
+        codec=H264,
+        subtitle_languages=frozenset({"en"}),
+    )
+
+    decision = rules.evaluate(upload, [existing])
+    assert decision is not None
+    assert decision.verdict == Verdict.ALLOW
+    assert "adds Vietnamese subtitles" in decision.why
+
+
