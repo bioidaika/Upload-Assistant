@@ -604,6 +604,12 @@ class UploadHelper:
                                     or meta.trumpable_id
                                     or meta.get(f"{tracker_name}_matched_id", None)
                                 )
+                            if not meta.get(f"{tracker_name}_trumpable_name"):
+                                meta[f"{tracker_name}_trumpable_name"] = (
+                                    (trumpable_dupes[0].get("name") if trumpable_dupes else None)
+                                    or meta.trumpable_name
+                                    or meta.get(f"{tracker_name}_matched_name", None)
+                                )
                             if trumpable_dupes and trumpable_dupes[0].get("trump_reason"):
                                 meta.trump_reason = trumpable_dupes[0].get("trump_reason")
                             elif meta.filename_match and meta.file_count_match:
@@ -647,6 +653,12 @@ class UploadHelper:
                                     (trumpable_dupes[0].get("id") if trumpable_dupes else None)
                                     or meta.trumpable_id
                                     or meta.get(f"{tracker_name}_matched_id", None)
+                                )
+                                if not meta.get(f"{tracker_name}_trumpable_name"):
+                                    meta[f"{tracker_name}_trumpable_name"] = (
+                                    (trumpable_dupes[0].get("name") if trumpable_dupes else None)
+                                    or meta.trumpable_name
+                                    or meta.get(f"{tracker_name}_matched_name", None)
                                 )
                         else:
                             upload = await self.prompt_yes_no(f"Upload to {tracker_name} anyway?", default=False)
@@ -727,6 +739,12 @@ class UploadHelper:
                     or meta.trumpable_id
                     or meta.get(f"{tracker_name}_matched_id", None)
                 )
+            if not meta.get(f"{tracker_name}_trumpable_name"):
+                meta[f"{tracker_name}_trumpable_name"] = (
+                    (trumpable_dupes[0].get("name") if trumpable_dupes else None)
+                    or meta.trumpable_name
+                    or meta.get(f"{tracker_name}_matched_name", None)
+                )
             if trumpable_dupes and trumpable_dupes[0].get("trump_reason"):
                 meta.trump_reason = trumpable_dupes[0].get("trump_reason")
             elif meta.filename_match and meta.file_count_match:
@@ -763,6 +781,18 @@ class UploadHelper:
                             or meta.trumpable_id
                             or conflict_id
                             or meta.get(f"{tracker_name}_matched_id", None)
+                        )
+                    if not meta.get(f"{tracker_name}_trumpable_name"):
+                        conflict_name = (
+                            slot_decision.conflicts[0].get("name")
+                            if has_slot_trump and slot_decision and slot_decision.conflicts
+                            else None
+                        )
+                        meta[f"{tracker_name}_trumpable_name"] = (
+                            (trumpable_dupes[0].get("name") if trumpable_dupes else None)
+                            or meta.trumpable_name
+                            or conflict_name
+                            or meta.get(f"{tracker_name}_matched_name", None)
                         )
                     if trumpable_dupes and trumpable_dupes[0].get("trump_reason"):
                         meta.trump_reason = trumpable_dupes[0].get("trump_reason")

@@ -1163,6 +1163,14 @@ class TrackerSetup:
             return False
         # Store per-tracker to avoid overwriting across multiple trackers
         meta[f"{tracker}_reported_torrent_id"] = reported_torrent_id
+        reported_torrent_name = (
+            meta.get(f"{tracker}_reported_torrent_name")
+            or meta.get(f"{tracker}_trumpable_name")
+            or meta.get(f"{tracker}_matched_name")
+            or meta.get("trumpable_name")
+        )
+        if reported_torrent_name:
+            meta[f"{tracker}_reported_torrent_name"] = reported_torrent_name
         if tracker == "LST":
             logger.debug("[bold green]LST does not support searching existing trump reports[/bold green]")
             return True
@@ -1385,6 +1393,144 @@ class TrackerSetup:
 
         return requests, status_code
 
+    def _build_trump_report_message(
+        self,
+        meta: Meta,
+        tracker: str,
+        reported_torrent_id: str,
+        trumping_torrent_id: str | None,
+        tracker_instance: Any,
+    ) -> str:
+        """Construct a structured trump report message with ready-to-copy deletion notice for staff."""
+        reported_torrent_name = (
+            meta.get(f"{tracker}_reported_torrent_name")
+            or meta.get(f"{tracker}_trumpable_name")
+            or meta.get(f"{tracker}_matched_name")
+            or meta.get("trumpable_name")
+        )
+        reported_display = (
+            f"{reported_torrent_name} (ID: {reported_torrent_id})"
+            if reported_torrent_name
+            else f"ID: {reported_torrent_id}"
+        )
+
+        trumping_name = meta.name or meta.clean_name or meta.ua_name or "New Release"
+        trumping_display = (
+            f"{trumping_name} (ID: {trumping_torrent_id})"
+            if trumping_torrent_id
+            else trumping_name
+        )
+
+        torrent_base_url = getattr(tracker_instance, "torrent_url", "")
+        trumping_url = (
+            f"{torrent_base_url}{trumping_torrent_id}"
+            if torrent_base_url and trumping_torrent_id
+            else ""
+        )
+
+        reason_key = "season_pack" if meta.tv_pack else (meta.trump_reason or "trumpable_release")
+
+        if tracker == "VIETMEDIAF":
+            reasons_vi = {
+                "missing_vietnamese_subtitles": (
+                    "Bổ sung phụ đề Tiếng Việt",
+                    "bổ sung phụ đề Tiếng Việt",
+                ),
+                "missing_dual_vietnamese_audio": (
+                    "Bổ sung đủ audio Thuyết minh & Lồng tiếng (Dual ViE)",
+                    "bổ sung đủ audio Thuyết minh & Lồng tiếng",
+                ),
+                "fewer_vietnamese_audio_tracks": (
+                    "Bổ sung thêm track audio Tiếng Việt chất lượng hơn",
+                    "bổ sung thêm track audio Tiếng Việt",
+                ),
+                "bad_release_group": (
+                    "Bản encode chuẩn thay thế nhóm chất lượng kém (YIFY/YTS/mSD/MeGusta/FGT)",
+                    "bản encode chuẩn thay thế nhóm chất lượng thấp",
+                ),
+                "exact_match": (
+                    "Trùng file chính xác (Exact match trump)",
+                    "bản phát hành tải lên chuẩn hơn",
+                ),
+                "season_pack": (
+                    "Gói trọn bộ (Season Pack) thay thế các tập lẻ",
+                    "trọn bộ Season Pack",
+                ),
+                "trumpable_release": (
+                    "Thay thế bản phát hành cũ được đánh dấu trumpable",
+                    "bản cập nhật mới",
+                ),
+            }
+            title, notice_reason = reasons_vi.get(
+                reason_key,
+                (f"{meta.ua_name} trump report", "bản cập nhật mới"),
+            )
+            url_part = f" ({trumping_url})" if trumping_url else ""
+            delete_notice = (
+                f"Torrent này đã bị thay thế bởi bản mới: {trumping_name}{url_part} do {notice_reason}. "
+                "Vui lòng tải lại file .torrent mới và tiếp tục reseed hỗ trợ cộng đồng!"
+            )
+            message = (
+                f"Báo cáo Trump: {title}\n\n"
+                f"• Torrent bị trump: {reported_display}\n"
+                f"• Torrent thay thế: {trumping_display}\n\n"
+                f"📋 Mẫu thông báo xóa cho Staff copy:\n"
+                f"{delete_notice}"
+            )
+            if meta.get("screenshots_in_description"):
+                message += "\n\n(Lưu ý: Uploader thông báo ảnh chụp so sánh có trong phần mô tả)."
+            return message
+
+        reasons_en = {
+            "missing_vietnamese_subtitles": (
+                "Release adds Vietnamese subtitles",
+                "release adds Vietnamese subtitles",
+            ),
+            "missing_dual_vietnamese_audio": (
+                "Release adds dual Vietnamese audio (TM+LT)",
+                "release adds dual Vietnamese audio (TM+LT)",
+            ),
+            "fewer_vietnamese_audio_tracks": (
+                "Release adds more Vietnamese audio tracks",
+                "release adds more Vietnamese audio tracks",
+            ),
+            "bad_release_group": (
+                "Proper encode replacing bad release group (YIFY/YTS/mSD/MeGusta/FGT)",
+                "proper encode replacing bad release group",
+            ),
+            "exact_match": (
+                "Exact filename trump",
+                "exact filename replacement",
+            ),
+            "season_pack": (
+                "Season pack trump",
+                "full season pack replacement",
+            ),
+            "trumpable_release": (
+                "Trumpable release trump",
+                "new replacement release",
+            ),
+        }
+        title, notice_reason = reasons_en.get(
+            reason_key,
+            (f"{meta.ua_name} trump report", "new replacement release"),
+        )
+        url_part = f" ({trumping_url})" if trumping_url else ""
+        delete_notice = (
+            f"This torrent has been replaced by: {trumping_name}{url_part} - {notice_reason}. "
+            "Please download the new .torrent file and reseed!"
+        )
+        message = (
+            f"Trump Report: {title}\n\n"
+            f"• Reported torrent: {reported_display}\n"
+            f"• Trumping torrent: {trumping_display}\n\n"
+            f"Suggested deletion notice for staff to copy:\n"
+            f"{delete_notice}"
+        )
+        if meta.get("screenshots_in_description"):
+            message += "\n\n(Note: User says comparison screenshots are in description)."
+        return message
+
     async def make_trumpable_report(self, meta: Meta, tracker: str) -> bool:
         """Create a trump report by POSTing to the /create endpoint"""
         logger.debug(f"[bold green]Creating trump report on {tracker}[/bold green]")
@@ -1436,29 +1582,37 @@ class TrackerSetup:
             # Set fallback for debug mode so payload construction doesn't fail
             trumping_torrent_id: str | None = None
 
-        if meta.tv_pack:
-            message = f"{meta.ua_name} season pack trump"
-        elif meta.trump_reason == "exact_match":
-            message = f"{meta.ua_name} exact filename trump"
-        elif meta.trump_reason == "missing_vietnamese_subtitles":
-            message = f"{meta.ua_name} trump: release adds Vietnamese subtitles"
-        elif meta.trump_reason == "missing_dual_vietnamese_audio":
-            message = f"{meta.ua_name} trump: release adds dual Vietnamese audio (TM+LT)"
-        elif meta.trump_reason == "trumpable_release":
-            message = f"{meta.ua_name} trumpable release trump"
-        else:
-            message = f"{meta.ua_name} is trumping this torrent for reasons {meta.ua_name} has not correctly caught. User selected yes at a prompt."
-
         if tracker != "LST":
-            payload: JsonDict = {"reported_torrent_id": reported_torrent_id, "trumping_torrent_id": trumping_torrent_id, "message": message}
+            message = self._build_trump_report_message(
+                meta, tracker, reported_torrent_id, trumping_torrent_id, tracker_instance
+            )
+            payload: JsonDict = {
+                "reported_torrent_id": reported_torrent_id,
+                "trumping_torrent_id": trumping_torrent_id,
+                "message": message,
+            }
             if "screenshots_reported_torrent" in meta:
                 payload["screenshots_reported_torrent"] = ",".join(cast(list[str], meta.screenshots_reported_torrent))
             if "screenshots_trumping_torrent" in meta:
                 payload["screenshots_trumping_torrent"] = ",".join(cast(list[str], meta.screenshots_trumping_torrent))
-            if "screenshots_in_description" in meta and meta.screenshots_in_description:
-                payload["message"] = f"{payload.get('message', '')} - User says comparison screenshots are in description."
-
         else:
+            if meta.tv_pack:
+                message = f"{meta.ua_name} season pack trump"
+            elif meta.trump_reason == "exact_match":
+                message = f"{meta.ua_name} exact filename trump"
+            elif meta.trump_reason == "missing_vietnamese_subtitles":
+                message = f"{meta.ua_name} trump: release adds Vietnamese subtitles"
+            elif meta.trump_reason == "missing_dual_vietnamese_audio":
+                message = f"{meta.ua_name} trump: release adds dual Vietnamese audio (TM+LT)"
+            elif meta.trump_reason == "fewer_vietnamese_audio_tracks":
+                message = f"{meta.ua_name} trump: release adds more Vietnamese audio tracks"
+            elif meta.trump_reason == "bad_release_group":
+                message = f"{meta.ua_name} trump: proper encode replacing bad release group"
+            elif meta.trump_reason == "trumpable_release":
+                message = f"{meta.ua_name} trumpable release trump"
+            else:
+                message = f"{meta.ua_name} is trumping this torrent for reasons {meta.ua_name} has not correctly caught. User selected yes at a prompt."
+
             if not meta.tv_pack:
                 if meta.unattended:
                     user_message = None

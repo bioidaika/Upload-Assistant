@@ -686,6 +686,7 @@ async def test_vietmediaf_unattended_auto_trump(monkeypatch: pytest.MonkeyPatch)
     assert meta_out_b.were_trumping is True
     assert meta_out_b.trump_reason == "missing_vietnamese_subtitles"
     assert meta_out_b.get("VIETMEDIAF_trumpable_id") == 12345
+    assert meta_out_b.get("VIETMEDIAF_trumpable_name") == "Movie.2024.1080p.BluRay.DTS-HD.MA.5.1-GRP"
 
 
     # With -uaa and Verdict.BLOCK (exact dupe on site): must NOT trump and must skip upload
@@ -718,3 +719,89 @@ async def test_vietmediaf_bad_release_groups_are_not_banned_from_upload():
     assert is_banned is False
     assert VietMediaF.banned_groups == ()
     assert "YTS" in VietMediaF.bad_release_groups
+
+
+def test_vietmediaf_build_trump_report_message():
+    from src.trackersetup import TrackerSetup
+    from src.trackers.UNIT3D.vietmediaf import VietMediaF
+
+    setup = TrackerSetup(example_config)
+    vmf_instance = VietMediaF(example_config)
+
+    meta = Meta(
+        name="Movie.2024.1080p.BluRay.x264.ViE-TEAM",
+        ua_name="Upload Assistant",
+        trump_reason="missing_vietnamese_subtitles",
+        VIETMEDIAF_reported_torrent_name="Movie.2024.1080p.BluRay.x264-OLD",
+        screenshots_in_description=True,
+    )
+
+    msg = setup._build_trump_report_message(
+        meta=meta,
+        tracker="VIETMEDIAF",
+        reported_torrent_id="111",
+        trumping_torrent_id="222",
+        tracker_instance=vmf_instance,
+    )
+
+    assert "Báo cáo Trump: Bổ sung phụ đề Tiếng Việt" in msg
+    assert "• Torrent bị trump: Movie.2024.1080p.BluRay.x264-OLD (ID: 111)" in msg
+    assert "• Torrent thay thế: Movie.2024.1080p.BluRay.x264.ViE-TEAM (ID: 222)" in msg
+    assert "📋 Mẫu thông báo xóa cho Staff copy:" in msg
+    assert "https://tracker.vietmediaf.store/torrents/222" in msg
+    assert "Vui lòng tải lại file .torrent mới và tiếp tục reseed hỗ trợ cộng đồng!" in msg
+    assert "(Lưu ý: Uploader thông báo ảnh chụp so sánh có trong phần mô tả)." in msg
+
+
+def test_vietmediaf_build_trump_report_message_bad_group():
+    from src.trackersetup import TrackerSetup
+    from src.trackers.UNIT3D.vietmediaf import VietMediaF
+
+    setup = TrackerSetup(example_config)
+    vmf_instance = VietMediaF(example_config)
+
+    meta = Meta(
+        name="Movie.2024.1080p.BluRay.x264-PROPER",
+        trump_reason="bad_release_group",
+        VIETMEDIAF_reported_torrent_name="Movie.2024.1080p.BluRay.x264-YTS",
+    )
+
+    msg = setup._build_trump_report_message(
+        meta=meta,
+        tracker="VIETMEDIAF",
+        reported_torrent_id="500",
+        trumping_torrent_id="501",
+        tracker_instance=vmf_instance,
+    )
+
+    assert "Bản encode chuẩn thay thế nhóm chất lượng kém (YIFY/YTS/mSD/MeGusta/FGT)" in msg
+    assert "• Torrent bị trump: Movie.2024.1080p.BluRay.x264-YTS (ID: 500)" in msg
+    assert "• Torrent thay thế: Movie.2024.1080p.BluRay.x264-PROPER (ID: 501)" in msg
+    assert "bản encode chuẩn thay thế nhóm chất lượng thấp" in msg
+
+
+def test_vietmediaf_build_trump_report_message_fewer_audio():
+    from src.trackersetup import TrackerSetup
+    from src.trackers.UNIT3D.vietmediaf import VietMediaF
+
+    setup = TrackerSetup(example_config)
+    vmf_instance = VietMediaF(example_config)
+
+    meta = Meta(
+        name="Movie.2024.1080p.BluRay.x264.ViE-DUB.2Audio-GRP",
+        trump_reason="fewer_vietnamese_audio_tracks",
+        VIETMEDIAF_reported_torrent_name="Movie.2024.1080p.BluRay.x264.ViE-DUB.1Audio-GRP",
+    )
+
+    msg = setup._build_trump_report_message(
+        meta=meta,
+        tracker="VIETMEDIAF",
+        reported_torrent_id="600",
+        trumping_torrent_id="601",
+        tracker_instance=vmf_instance,
+    )
+
+    assert "Bổ sung thêm track audio Tiếng Việt chất lượng hơn" in msg
+    assert "• Torrent bị trump: Movie.2024.1080p.BluRay.x264.ViE-DUB.1Audio-GRP (ID: 600)" in msg
+    assert "• Torrent thay thế: Movie.2024.1080p.BluRay.x264.ViE-DUB.2Audio-GRP (ID: 601)" in msg
+    assert "bổ sung thêm track audio Tiếng Việt" in msg

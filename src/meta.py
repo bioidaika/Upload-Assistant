@@ -535,6 +535,7 @@ class Meta:
     transmission_label: str | None = None
     trump_reason: str | None = None
     trumpable_id: int | str | None = None
+    trumpable_name: str | None = None
     trumping_trackers: list[Any] = field(default_factory=list)
     tv_movie: bool = False
     tv_pack: bool = False

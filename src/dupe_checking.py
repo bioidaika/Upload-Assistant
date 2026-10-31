@@ -69,6 +69,7 @@ class DupeChecker:
                 logger.debug(dupes)
 
         meta.trumpable_id = None
+        meta.trumpable_name = None
         meta.season_pack_exists = False
         meta.season_pack_id = None
         meta.season_pack_link = None
@@ -560,6 +561,7 @@ class DupeChecker:
             if tracker_name in ["AITHER", "LST", "VIETMEDIAF"] and entry.get("trumpable", False):
                 if not res_id or not target_resolution or target_resolution == res_id or (res_id in target_resolution or target_resolution in str(res_id)):
                     meta.trumpable_id = entry.get("id")
+                    meta.trumpable_name = entry.get("name")
                     remember_match("trumpable_id")
 
             if not meta.is_disc:
