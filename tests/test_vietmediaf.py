@@ -744,13 +744,13 @@ def test_vietmediaf_build_trump_report_message():
         tracker_instance=vmf_instance,
     )
 
-    assert "Báo cáo Trump: Bổ sung phụ đề Tiếng Việt" in msg
-    assert "• Torrent bị trump: Movie.2024.1080p.BluRay.x264-OLD (ID: 111)" in msg
-    assert "• Torrent thay thế: Movie.2024.1080p.BluRay.x264.ViE-TEAM (ID: 222)" in msg
-    assert "📋 Mẫu thông báo xóa cho Staff copy:" in msg
+    assert "Trump Report: Release adds Vietnamese subtitles" in msg
+    assert "• Reported torrent: Movie.2024.1080p.BluRay.x264-OLD (ID: 111)" in msg
+    assert "• Trumping torrent: Movie.2024.1080p.BluRay.x264.ViE-TEAM (ID: 222)" in msg
+    assert "📋 Suggested deletion notice for staff to copy:" in msg
     assert "https://tracker.vietmediaf.store/torrents/222" in msg
-    assert "Vui lòng tải lại file .torrent mới và tiếp tục reseed hỗ trợ cộng đồng!" in msg
-    assert "(Lưu ý: Uploader thông báo ảnh chụp so sánh có trong phần mô tả)." in msg
+    assert "Please download the new .torrent file and reseed!" in msg
+    assert "(Note: User says comparison screenshots are in description)." in msg
 
 
 def test_vietmediaf_build_trump_report_message_bad_group():
@@ -774,10 +774,10 @@ def test_vietmediaf_build_trump_report_message_bad_group():
         tracker_instance=vmf_instance,
     )
 
-    assert "Bản encode chuẩn thay thế nhóm chất lượng kém (YIFY/YTS/mSD/MeGusta/FGT)" in msg
-    assert "• Torrent bị trump: Movie.2024.1080p.BluRay.x264-YTS (ID: 500)" in msg
-    assert "• Torrent thay thế: Movie.2024.1080p.BluRay.x264-PROPER (ID: 501)" in msg
-    assert "bản encode chuẩn thay thế nhóm chất lượng thấp" in msg
+    assert "Proper encode replacing bad release group (YIFY/YTS/mSD/MeGusta/FGT)" in msg
+    assert "• Reported torrent: Movie.2024.1080p.BluRay.x264-YTS (ID: 500)" in msg
+    assert "• Trumping torrent: Movie.2024.1080p.BluRay.x264-PROPER (ID: 501)" in msg
+    assert "proper encode replacing bad release group" in msg
 
 
 def test_vietmediaf_build_trump_report_message_fewer_audio():
@@ -801,7 +801,7 @@ def test_vietmediaf_build_trump_report_message_fewer_audio():
         tracker_instance=vmf_instance,
     )
 
-    assert "Bổ sung thêm track audio Tiếng Việt chất lượng hơn" in msg
-    assert "• Torrent bị trump: Movie.2024.1080p.BluRay.x264.ViE-DUB.1Audio-GRP (ID: 600)" in msg
-    assert "• Torrent thay thế: Movie.2024.1080p.BluRay.x264.ViE-DUB.2Audio-GRP (ID: 601)" in msg
-    assert "bổ sung thêm track audio Tiếng Việt" in msg
+    assert "Release adds more Vietnamese audio tracks" in msg
+    assert "• Reported torrent: Movie.2024.1080p.BluRay.x264.ViE-DUB.1Audio-GRP (ID: 600)" in msg
+    assert "• Trumping torrent: Movie.2024.1080p.BluRay.x264.ViE-DUB.2Audio-GRP (ID: 601)" in msg
+    assert "release adds more Vietnamese audio tracks" in msg

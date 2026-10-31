@@ -1430,58 +1430,7 @@ class TrackerSetup:
 
         reason_key = "season_pack" if meta.tv_pack else (meta.trump_reason or "trumpable_release")
 
-        if tracker == "VIETMEDIAF":
-            reasons_vi = {
-                "missing_vietnamese_subtitles": (
-                    "Bổ sung phụ đề Tiếng Việt",
-                    "bổ sung phụ đề Tiếng Việt",
-                ),
-                "missing_dual_vietnamese_audio": (
-                    "Bổ sung đủ audio Thuyết minh & Lồng tiếng (Dual ViE)",
-                    "bổ sung đủ audio Thuyết minh & Lồng tiếng",
-                ),
-                "fewer_vietnamese_audio_tracks": (
-                    "Bổ sung thêm track audio Tiếng Việt chất lượng hơn",
-                    "bổ sung thêm track audio Tiếng Việt",
-                ),
-                "bad_release_group": (
-                    "Bản encode chuẩn thay thế nhóm chất lượng kém (YIFY/YTS/mSD/MeGusta/FGT)",
-                    "bản encode chuẩn thay thế nhóm chất lượng thấp",
-                ),
-                "exact_match": (
-                    "Trùng file chính xác (Exact match trump)",
-                    "bản phát hành tải lên chuẩn hơn",
-                ),
-                "season_pack": (
-                    "Gói trọn bộ (Season Pack) thay thế các tập lẻ",
-                    "trọn bộ Season Pack",
-                ),
-                "trumpable_release": (
-                    "Thay thế bản phát hành cũ được đánh dấu trumpable",
-                    "bản cập nhật mới",
-                ),
-            }
-            title, notice_reason = reasons_vi.get(
-                reason_key,
-                (f"{meta.ua_name} trump report", "bản cập nhật mới"),
-            )
-            url_part = f" ({trumping_url})" if trumping_url else ""
-            delete_notice = (
-                f"Torrent này đã bị thay thế bởi bản mới: {trumping_name}{url_part} do {notice_reason}. "
-                "Vui lòng tải lại file .torrent mới và tiếp tục reseed hỗ trợ cộng đồng!"
-            )
-            message = (
-                f"Báo cáo Trump: {title}\n\n"
-                f"• Torrent bị trump: {reported_display}\n"
-                f"• Torrent thay thế: {trumping_display}\n\n"
-                f"📋 Mẫu thông báo xóa cho Staff copy:\n"
-                f"{delete_notice}"
-            )
-            if meta.get("screenshots_in_description"):
-                message += "\n\n(Lưu ý: Uploader thông báo ảnh chụp so sánh có trong phần mô tả)."
-            return message
-
-        reasons_en = {
+        reasons = {
             "missing_vietnamese_subtitles": (
                 "Release adds Vietnamese subtitles",
                 "release adds Vietnamese subtitles",
@@ -1511,7 +1460,7 @@ class TrackerSetup:
                 "new replacement release",
             ),
         }
-        title, notice_reason = reasons_en.get(
+        title, notice_reason = reasons.get(
             reason_key,
             (f"{meta.ua_name} trump report", "new replacement release"),
         )
@@ -1524,7 +1473,7 @@ class TrackerSetup:
             f"Trump Report: {title}\n\n"
             f"• Reported torrent: {reported_display}\n"
             f"• Trumping torrent: {trumping_display}\n\n"
-            f"Suggested deletion notice for staff to copy:\n"
+            f"📋 Suggested deletion notice for staff to copy:\n"
             f"{delete_notice}"
         )
         if meta.get("screenshots_in_description"):
