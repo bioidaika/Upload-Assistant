@@ -53,6 +53,8 @@ def test_vietmediaf_profile_uses_canonical_identity_and_unit3d_endpoints():
     assert vietmediaf.upload_url == "https://tracker.vietmediaf.store/api/torrents/upload"
     assert vietmediaf.torrent_url == "https://tracker.vietmediaf.store/torrents/"
     assert vietmediaf.search_max_retries == -1
+    assert vietmediaf.banned_groups == ()
+    assert vietmediaf.bad_release_groups == ("YIFY", "YTS", "mSD", "MeGusta", "FGT")
 
 
 def test_vietmediaf_is_registered_as_unit3d_api_tracker_with_comment_host():
@@ -507,6 +509,143 @@ def test_vietmediaf_slot_rules_trumps_when_upload_adds_vietnamese_subs():
 
 
 
+def test_vietmediaf_trumps_bad_release_group():
+    vmf = tracker()
+    meta_upload = Meta(
+        name="Movie.2024.1080p.AMZN.WEB-DL.DDP5.1.H.264-FLUX",
+        resolution="1080p",
+        category="MOVIE",
+        subtitle_languages=["vi"],
+    )
+    dupes = [
+        {
+            "id": 2001,
+            "name": "Movie.2024.1080p.WEBRip.x264-YTS",
+            "trumpable": False,
+        }
+    ]
+    vmf._apply_vietnamese_trump_rules(meta_upload, dupes)
+    assert dupes[0]["trumpable"] is True
+    assert dupes[0]["trump_reason"] == "bad_release_group"
+
+
+def test_vietmediaf_trumps_fewer_vietnamese_audio_tracks():
+    vmf = tracker()
+    meta_upload = Meta(
+        name="Movie.2024.ViE.1080p.AMZN.WEB-DL.DDP5.1.H.264-GRP",
+        resolution="1080p",
+        category="MOVIE",
+        subtitle_languages=["vi"],
+        mediainfo={
+            "media": {
+                "track": [
+                    {"@type": "Audio", "Title": "Thuyết Minh"},
+                    {"@type": "Audio", "Title": "Lồng Tiếng"},
+                ]
+            }
+        },
+    )
+    dupes = [
+        {
+            "id": 2002,
+            "name": "Movie.2024.ViE.1080p.AMZN.WEB-DL.DDP5.1.H.264-OLD",
+            "media_info": "Audio #1\nTitle : Thuyết Minh\n\nText #1\nLanguage : Vietnamese\n",
+            "trumpable": False,
+        }
+    ]
+    vmf._apply_vietnamese_trump_rules(meta_upload, dupes)
+    assert dupes[0]["trumpable"] is True
+    assert dupes[0]["trump_reason"] in ("fewer_vietnamese_audio_tracks", "missing_dual_vietnamese_audio")
+
+
+def test_vietmediaf_trumping_resets_trumpable_on_different_slot():
+    vmf = tracker()
+    # Upload is ViE, existing is Original slot marked trumpable by tracker API
+    meta_upload = Meta(
+        name="Movie.2024.ViE.1080p.AMZN.WEB-DL.DDP5.1.H.264-GRP",
+        resolution="1080p",
+        category="MOVIE",
+        subtitle_languages=["vi"],
+    )
+    dupes = [
+        {
+            "id": 2003,
+            "name": "Movie.2024.1080p.AMZN.WEB-DL.DDP5.1.H.264-OLD",
+            "trumpable": True,
+            "trump_reason": "missing_vietnamese_subtitles",
+        }
+    ]
+    vmf._apply_vietnamese_trump_rules(meta_upload, dupes)
+    # Must NOT trump cross-slot
+    assert dupes[0]["trumpable"] is False
+
+
+def test_vietmediaf_slot_rules_trumps_bad_release_group():
+    from src.slot_rules.trackers.vietmediaf import VietMediaFSlotRules
+    from src.slot_rules.models import Verdict
+    from src.slot_rules.profile import ReleaseProfile, WEBDL, H264
+
+    rules = VietMediaFSlotRules(Meta(category="MOVIE"))
+    upload = ReleaseProfile(
+        name="Movie.2024.1080p.AMZN.WEB-DL.DDP5.1.H.264-FLUX",
+        resolution="1080p",
+        kind=WEBDL,
+        codec=H264,
+        subtitle_languages=frozenset({"vi"}),
+    )
+    existing = ReleaseProfile(
+        name="Movie.2024.1080p.AMZN.WEB-DL.DDP5.1.H.264-YTS",
+        resolution="1080p",
+        kind=WEBDL,
+        codec=H264,
+        subtitle_languages=frozenset({"vi"}),
+    )
+
+    decision = rules.evaluate(upload, [existing])
+    assert decision is not None
+    assert decision.verdict == Verdict.ALLOW
+    assert "bad release group" in decision.why
+
+
+def test_vietmediaf_slot_rules_trumps_fewer_vietnamese_audio_tracks():
+    from src.slot_rules.trackers.vietmediaf import VietMediaFSlotRules
+    from src.slot_rules.models import Verdict
+    from src.slot_rules.profile import ReleaseProfile, WEBDL, H264
+
+    meta = Meta(
+        category="MOVIE",
+        mediainfo={
+            "media": {
+                "track": [
+                    {"@type": "Audio", "Title": "Thuyết Minh"},
+                    {"@type": "Audio", "Title": "Lồng Tiếng"},
+                ]
+            }
+        },
+    )
+    rules = VietMediaFSlotRules(meta)
+    upload = ReleaseProfile(
+        name="Movie.2024.ViE.1080p.AMZN.WEB-DL.DDP5.1.H.264-NEW",
+        resolution="1080p",
+        kind=WEBDL,
+        codec=H264,
+        subtitle_languages=frozenset({"vi"}),
+    )
+    existing = ReleaseProfile(
+        name="Movie.2024.ViE.1080p.AMZN.WEB-DL.DDP5.1.H.264-OLD",
+        resolution="1080p",
+        kind=WEBDL,
+        codec=H264,
+        subtitle_languages=frozenset({"vi"}),
+        entry={"media_info": "Audio #1\nTitle : Thuyết Minh\n"},
+    )
+
+    decision = rules.evaluate(upload, [existing])
+    assert decision is not None
+    assert decision.verdict == Verdict.ALLOW
+    assert "more Vietnamese audio tracks" in decision.why
+
+
 def test_vietmediaf_incomplete_pack_naming():
     from src.trackers.naming import add_incomplete_pack_marker, INCOMPLETE_PACK_TRACKERS
 
@@ -568,3 +707,14 @@ async def test_vietmediaf_unattended_auto_trump(monkeypatch: pytest.MonkeyPatch)
     is_dupe_c, meta_out_c = await helper.dupe_check(exact_dupes, meta_block, "VIETMEDIAF", decision_block)
     assert is_dupe_c is True
     assert meta_out_c.were_trumping is False
+
+
+@pytest.mark.asyncio
+async def test_vietmediaf_bad_release_groups_are_not_banned_from_upload():
+    from src.trackersetup import TrackerSetup
+    setup = TrackerSetup(example_config)
+    meta = Meta(tag="-YTS")
+    is_banned = await setup.check_banned_group("VIETMEDIAF", VietMediaF.banned_groups, meta)
+    assert is_banned is False
+    assert VietMediaF.banned_groups == ()
+    assert "YTS" in VietMediaF.bad_release_groups

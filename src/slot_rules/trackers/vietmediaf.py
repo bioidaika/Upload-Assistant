@@ -32,19 +32,46 @@ class VietMediaFSlotRules(SlotRules):
         audio = self.audio_slot(profile)
         return (res, kind, codec, audio, profile.edition)
 
-    @classmethod
-    def vietmediaf_trump(cls, upload: ReleaseProfile, existing: ReleaseProfile) -> tuple[Verdict, str]:
+    def vietmediaf_trump(self, upload: ReleaseProfile, existing: ReleaseProfile) -> tuple[Verdict, str]:
         # 1. Repack check
-        repack_verdict, repack_reason = cls.default_trump(upload, existing)
+        repack_verdict, repack_reason = self.default_trump(upload, existing)
         if repack_verdict is Verdict.ALLOW:
             return repack_verdict, repack_reason
 
-        # 2. Vietnamese subtitles check:
+        # 2. Bad release group check:
+        # If existing release is from a bad release group and upload is a proper encode
+        if VietMediaF._is_bad_release_group(existing.name) and not VietMediaF._is_bad_release_group(upload.name):
+            return Verdict.ALLOW, "Existing release is from a bad release group while your upload is a proper release."
+
+        # 3. Vietnamese subtitles check:
         # If upload has Vietnamese subtitles and existing release lacks them
         upload_vi_sub = bool(upload.subtitle_languages and "vi" in upload.subtitle_languages)
         existing_vi_sub = bool(existing.subtitle_languages and "vi" in existing.subtitle_languages)
         if upload_vi_sub and not existing_vi_sub:
             return Verdict.ALLOW, "Your release adds Vietnamese subtitles which the existing release lacks."
+
+        # 4. Vietnamese audio count check (within ViE / ViE DUB slots):
+        audio_slot = self.audio_slot(upload)
+        if audio_slot in ("ViE", "ViE DUB"):
+            upload_vi_count = 0
+            if self.meta is not None:
+                upload_vi_count = VietMediaF._count_vietnamese_audio_tracks_meta(self.meta)
+            if upload.entry:
+                upload_vi_count = max(upload_vi_count, VietMediaF._count_vietnamese_audio_tracks_entry(dict(upload.entry)))
+            if upload_vi_count == 0 and VietMediaF._existing_audio_tag(upload.name):
+                upload_vi_count = 1
+
+            existing_vi_count = 0
+            if existing.entry:
+                existing_vi_count = VietMediaF._count_vietnamese_audio_tracks_entry(dict(existing.entry))
+            if existing_vi_count == 0 and VietMediaF._existing_audio_tag(existing.name):
+                existing_vi_count = 1
+
+            if upload_vi_count > existing_vi_count:
+                return (
+                    Verdict.ALLOW,
+                    f"Your release has more Vietnamese audio tracks ({upload_vi_count}) than the existing release ({existing_vi_count}).",
+                )
 
         return Verdict.BLOCK, ""
 

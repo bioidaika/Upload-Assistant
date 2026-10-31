@@ -15,6 +15,7 @@ class VietMediaF(UNIT3D):
     display_name = "VietMediaF"
     base_url = "https://tracker.vietmediaf.store"
     banned_groups: tuple[str, ...] = ()
+    bad_release_groups: tuple[str, ...] = ("YIFY", "YTS", "mSD", "MeGusta", "FGT")
     id_url = f"{base_url}/api/torrents/"
     upload_url = f"{base_url}/api/torrents/upload"
     requests_url = f"{base_url}/api/requests/filter"
@@ -355,6 +356,78 @@ class VietMediaF(UNIT3D):
         return False
 
     @classmethod
+    def _is_bad_release_group(cls, name: str) -> bool:
+        if not name:
+            return False
+        pattern = r"[-._\s\[](?:" + "|".join(re.escape(g) for g in cls.bad_release_groups) + r")([.\s\]]|$)"
+        return bool(re.search(pattern, name, re.IGNORECASE))
+
+    @classmethod
+    def _count_vietnamese_audio_tracks_meta(cls, meta: Meta) -> int:
+        mediainfo = meta.mediainfo
+        if isinstance(mediainfo, dict):
+            media = mediainfo.get("media")
+            if isinstance(media, dict):
+                raw_tracks = media.get("track", [])
+                if isinstance(raw_tracks, list):
+                    count = 0
+                    for raw_track in raw_tracks:
+                        if not isinstance(raw_track, dict):
+                            continue
+                        if str(raw_track.get("@type", "")).casefold() != "audio":
+                            continue
+                        is_vi = False
+                        for key in ("Language", "language"):
+                            val = raw_track.get(key)
+                            if isinstance(val, str) and val.strip():
+                                norm = cls._normalized_words(val)
+                                if cls._vietnamese_language_tokens.intersection(norm.split()) or "tieng viet" in norm:
+                                    is_vi = True
+                                    break
+                        if not is_vi:
+                            for key in ("Title", "title", "title_string"):
+                                val = raw_track.get(key)
+                                if isinstance(val, str) and val.strip():
+                                    norm = cls._normalized_words(val)
+                                    if any(p.search(norm) for p in cls._dub_title_tokens) or any(p.search(norm) for p in cls._voice_over_title_tokens):
+                                        is_vi = True
+                                        break
+                        if is_vi:
+                            count += 1
+                    if count > 0:
+                        return count
+
+        raw_text = str(mediainfo or "")
+        if raw_text and "Audio" in raw_text:
+            audio_sections = re.findall(r"Audio(?: #\d+)?\s*\n(.*?)(?=\n\n(?:Audio|Video|Text|Menu)|$)", raw_text, re.DOTALL | re.IGNORECASE)
+            if audio_sections:
+                count = 0
+                for sec in audio_sections:
+                    sec_norm = cls._normalized_words(sec)
+                    if any(t in sec_norm for t in ("vietnamese", "tieng viet")) or any(p.search(sec_norm) for p in cls._dub_title_tokens) or any(p.search(sec_norm) for p in cls._voice_over_title_tokens):
+                        count += 1
+                if count > 0:
+                    return count
+
+        return 2 if cls._has_dual_vietnamese_audio_meta(meta) else (1 if cls._metadata_audio_tag(meta) else 0)
+
+    @classmethod
+    def _count_vietnamese_audio_tracks_entry(cls, entry: dict[str, Any]) -> int:
+        media_info = str(entry.get("media_info") or "")
+        if media_info:
+            audio_sections = re.findall(r"Audio(?: #\d+)?\s*\n(.*?)(?=\n\n(?:Audio|Video|Text|Menu)|$)", media_info, re.DOTALL | re.IGNORECASE)
+            if audio_sections:
+                count = 0
+                for sec in audio_sections:
+                    sec_norm = cls._normalized_words(sec)
+                    if any(t in sec_norm for t in ("vietnamese", "tieng viet")) or any(p.search(sec_norm) for p in cls._dub_title_tokens) or any(p.search(sec_norm) for p in cls._voice_over_title_tokens):
+                        count += 1
+                if count > 0:
+                    return count
+
+        return 2 if cls._has_dual_vietnamese_audio_entry(entry) else (1 if cls._existing_audio_tag(str(entry.get("name") or "")) else 0)
+
+    @classmethod
     def _has_dual_vietnamese_audio_meta(cls, meta: Meta) -> bool:
         normalized_titles = [cls._normalized_words(title) for title in cls._extract_audio_titles(meta)]
         has_dub = any(pattern.search(title) for title in normalized_titles for pattern in cls._dub_title_tokens)
@@ -381,30 +454,55 @@ class VietMediaF(UNIT3D):
         upload_slot = self._meta_audio_slot(meta)
         has_vi_sub_upload = self._has_vietnamese_subtitles_meta(meta)
         has_dual_vi_upload = self._has_dual_vietnamese_audio_meta(meta)
+        upload_vi_audio_count = self._count_vietnamese_audio_tracks_meta(meta)
+        upload_name = meta.name or ""
 
         for entry in dupes:
             if not isinstance(entry, dict):
                 continue
+            entry_name = str(entry.get("name") or "")
             entry_slot = self._entry_audio_slot(entry)
-            # Phuong an A: Only check trumping within the exact same slot
+
+            # Different slot: cannot trump cross-slot. Reset trumpable if tracker API marked it
             if upload_slot != entry_slot:
+                if entry.get("trumpable", False):
+                    entry["trumpable"] = False
                 continue
 
-            # 1. Subtitle trumping within same slot
+            # 1. Bad Release Group trumping
+            if self._is_bad_release_group(entry_name) and not self._is_bad_release_group(upload_name):
+                entry["trumpable"] = True
+                entry["trump_reason"] = "bad_release_group"
+                logger.info(
+                    f"[bold green]{self.tracker}: Torrent {entry.get('id')} ({entry_name}) "
+                    f"is from a bad release group while your upload is a proper release. Marked as trumpable![/bold green]"
+                )
+                continue
+
+            # 2. Subtitle trumping within same slot (Original, ViE, ViE DUB)
             if has_vi_sub_upload and not self._has_vietnamese_subtitles_entry(entry):
                 entry["trumpable"] = True
                 entry["trump_reason"] = "missing_vietnamese_subtitles"
                 logger.info(
-                    f"[bold green]{self.tracker}: Torrent {entry.get('id')} ({entry.get('name')}) "
+                    f"[bold green]{self.tracker}: Torrent {entry.get('id')} ({entry_name}) "
                     f"lacks Vietnamese subtitles while your upload includes them. Marked as trumpable![/bold green]"
                 )
-            # 2. Dual audio trumping within ViE / ViE DUB slots
-            elif upload_slot in ("ViE", "ViE DUB") and has_dual_vi_upload and not self._has_dual_vietnamese_audio_entry(entry):
+                continue
+
+            # 3. Audio track count trumping within ViE / ViE DUB slots
+            entry_vi_audio_count = self._count_vietnamese_audio_tracks_entry(entry)
+            if upload_slot in ("ViE", "ViE DUB") and (
+                (has_dual_vi_upload and not self._has_dual_vietnamese_audio_entry(entry))
+                or (upload_vi_audio_count > entry_vi_audio_count)
+            ):
                 entry["trumpable"] = True
-                entry["trump_reason"] = "missing_dual_vietnamese_audio"
+                if has_dual_vi_upload and not self._has_dual_vietnamese_audio_entry(entry):
+                    entry["trump_reason"] = "missing_dual_vietnamese_audio"
+                else:
+                    entry["trump_reason"] = "fewer_vietnamese_audio_tracks"
                 logger.info(
-                    f"[bold green]{self.tracker}: Torrent {entry.get('id')} ({entry.get('name')}) "
-                    f"has single Vietnamese audio while your upload has dual TM+LT. Marked as trumpable![/bold green]"
+                    f"[bold green]{self.tracker}: Torrent {entry.get('id')} ({entry_name}) "
+                    f"has fewer Vietnamese audio tracks ({entry_vi_audio_count}) while your upload has {upload_vi_audio_count}. Marked as trumpable![/bold green]"
                 )
 
     async def search_existing(self, meta: Meta) -> list[dict[str, Any]]:
