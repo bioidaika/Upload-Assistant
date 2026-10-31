@@ -15,6 +15,8 @@ from src.meta import Meta
 from src.music.analyzer import _embedded_image_bytes, _flac_has_id3
 from src.music.models import AudioTrack, MetadataSource, MusicRelease
 from src.music.validation import OrpheusMusicValidator, lame_preset, resolve_orpheus_edition
+from src.slot_rules.models import Verdict
+from src.slot_rules.trackers.orpheus import SLOT_DECISION_KEY
 from src.trackers.GAZELLE.orpheus import Orpheus
 from src.trackers.GAZELLE.orpheus_tags import orpheus_tags
 
@@ -233,16 +235,6 @@ def test_release_description_documents_hybrids_scene_watermark_and_lineage(tmp_p
     assert "Turntable > preamp > ADC" in description
 
 
-def test_lossy_trump_relations():
-    relation = Orpheus._lossy_relation
-    assert relation("V0 (VBR)", "V0 (VBR)") == "dupe"
-    assert relation("V0 (VBR)", "APX (VBR)") == "trumps"
-    assert relation("APS (VBR)", "V2 (VBR)") == "trumped"
-    assert relation("320", "V0 (VBR)") == "coexists"
-    assert relation("192", "V0 (VBR)") == "trumped"
-    assert relation("320", "256") == "trumps"
-
-
 def test_duplicate_search_assesses_each_torrent_in_the_matching_group():
     release = _release(release_label="Fictional Records", release_year="2019")
     # A folder catalogue number is not sent, but it identifies the release.
@@ -269,12 +261,15 @@ def test_duplicate_search_assesses_each_torrent_in_the_matching_group():
         dupes = asyncio.run(_adapter().search_existing(meta))
 
     flags = [dupe["flags"][0] for dupe in dupes]
-    assert flags[0].startswith("DUPE: same release")
-    assert "site lists this catalogue as 2018" in flags[0]
-    assert flags[1].startswith("LIKELY DUPE: same edition year")
-    assert flags[2].startswith("different edition year")
+    assert flags[0].startswith("DUPE: A 16-bit FLAC already exists")
+    assert flags[1].startswith("REVIEW: A release from the same year")
+    assert flags[2] == "coexists with your upload"
     assert flags[3] == "different release group"
     assert dupes[0]["link"].endswith("torrentid=7")
+    decision = meta[SLOT_DECISION_KEY]
+    assert decision.verdict is Verdict.BLOCK
+    assert [conflict["id"] for conflict in decision.conflicts] == [7]
+    assert any("catalogue FR-0042 / FR-0043 as 2018" in note for note in decision.notes)
 
 
 def test_request_search_uses_the_music_category_and_reports_compatibility():
@@ -482,8 +477,8 @@ def test_scene_checkbox_is_only_sent_for_scene_uploads():
 def test_dupe_search_finds_a_group_written_differently():
     # Mirrors a real miss: different artist alias, punctuation and state name.
     release = _release(
-        artist="Robbie Lane & Night Owls",
-        artists=["Robbie Lane & Night Owls"],
+        artist="Robbie Vantor & Velvet Moths",
+        artists=["Robbie Vantor & Velvet Moths"],
         album="2023 12 31: Grand Hall Of Fictional Arts, Springfield, Florida",
         year="2023",
         release_year="2023",
@@ -492,7 +487,7 @@ def test_dupe_search_finds_a_group_written_differently():
     existing = {
         "groupId": 77,
         "groupName": "2023-12-31 Grand Hall of Fictional Arts, Springfield, FL",
-        "artist": "Rob Lane and Night Owls",
+        "artist": "Rob Vantor and Velvet Moths",
         "groupYear": 2023,
         "torrents": [{"torrentId": 5, "remasterYear": 2023, "media": "WEB", "format": "FLAC", "encoding": "Lossless"}],
     }
@@ -505,17 +500,17 @@ def test_dupe_search_finds_a_group_written_differently():
     with patch.object(Orpheus, "_api_get", new=fake_get), patch("asyncio.sleep", new=AsyncMock()):
         dupes = asyncio.run(_adapter().search_existing(meta))
 
-    assert len(calls) == 3
-    assert dupes[0]["flags"][0].startswith("LIKELY DUPE")
+    assert [call["action"] for call in calls] == ["browse", "browse", "browse", "torrentgroup"]
+    assert dupes[0]["flags"][0].startswith("DUPE")
 
 
 def test_group_matching_rejects_other_shows_and_artists():
-    release = _release(artist="Robbie Lane & Night Owls", artists=["Robbie Lane & Night Owls"])
+    release = _release(artist="Robbie Vantor & Velvet Moths", artists=["Robbie Vantor & Velvet Moths"])
     assert not Orpheus._same_group_title("2023 12 31 Grand Hall", "2023-12-30 Grand Hall")
     assert Orpheus._same_group_title("Paper Moons (Deluxe)", "Paper Moons Deluxe")
     assert not Orpheus._same_group_title("Paper Moons", "Paper Moons Remixed And Extended")
     assert not Orpheus._shares_artist(release, "Someone Else Entirely")
-    assert Orpheus._shares_artist(release, "Rob Lane and Night Owls")
+    assert Orpheus._shares_artist(release, "Rob Vantor and Velvet Moths")
 
 
 def test_dated_titles_are_concert_recordings(tmp_path):
@@ -534,11 +529,11 @@ def test_same_date_at_another_venue_is_not_the_same_group():
 
 
 def test_artist_matching_is_strict_for_title_only_results():
-    single = _release(artist="Robbie Lane", artists=["Robbie Lane"])
+    single = _release(artist="Robbie Vantor", artists=["Robbie Vantor"])
     # Server-side artist filter (first query): a co-credit still matches.
-    assert Orpheus._shares_artist(single, "Robbie Lane & Marco Fictus")
+    assert Orpheus._shares_artist(single, "Robbie Vantor & Marco Fictus")
     # Title/date-only queries need most of the larger credit to match.
-    assert not Orpheus._shares_artist(single, "Robbie Lane & Marco Fictus & Third Person", strict=True)
+    assert not Orpheus._shares_artist(single, "Robbie Vantor & Marco Fictus & Third Person", strict=True)
     assert not Orpheus._shares_artist(single, "", strict=True)
     assert not Orpheus._shares_artist(single, "Various Artists", strict=True)
     compilation = _release(release_type="Compilation")
@@ -705,3 +700,38 @@ def test_featuring_in_the_main_credit_and_named_remixes_become_roles():
     assert Orpheus._artist_credits(Meta(category="MUSIC"), plain) == [("Neon Tide", 1), ("Guest Voice", 2)]
     assert Orpheus._title_remixers("Paper Boat (Extended Mix)") == []
     assert Orpheus._title_remixers("Paper Boat (Original Remix)") == []
+
+
+def test_release_type_markers_do_not_split_groups():
+    assert Orpheus._strip_type_marker("Paper Boat EP") == ("Paper Boat", "ep")
+    assert Orpheus._strip_type_marker("Paper Boat - Single") == ("Paper Boat", "single")
+    assert Orpheus._strip_type_marker("Night Shift (Live)") == ("Night Shift", "live")
+    for title in ("The EP", "EP", "Stay Live", "Steep"):
+        assert Orpheus._strip_type_marker(title) == (title, "")
+    assert Orpheus._same_group_title("Paper Boat EP", "Paper Boat")
+    assert Orpheus._same_group_title("Night Shift (Live)", "Night Shift")
+
+
+def test_upload_title_drops_a_marker_that_repeats_the_release_type():
+    ep = _release(album="Paper Boat EP", release_type="EP")
+    assert _adapter().build_upload_payload(Meta(category="MUSIC"), ep)["title"] == "Paper Boat"
+    # A marker that does not match the release type is part of the title.
+    album = _release(album="Paper Boat EP", release_type="Album")
+    assert _adapter().build_upload_payload(Meta(category="MUSIC"), album)["title"] == "Paper Boat EP"
+
+
+def test_dupe_search_ignores_a_trailing_type_marker():
+    release = _release(album="Paper Boat EP", release_type="EP", release_year="2019")
+    meta = Meta(category="MUSIC", music_release=release.to_dict())
+    existing = {"groupId": 3, "groupName": "Paper Boat", "artist": "Fictional Band", "torrents": [{"torrentId": 8, "remasterYear": 2019, "media": "WEB", "format": "FLAC", "encoding": "Lossless"}]}
+    calls: list[dict[str, str]] = []
+
+    async def fake_get(_self: Orpheus, _meta: Meta, params: dict[str, str], _timeout_seconds: float, _purpose: str) -> dict[str, Any]:
+        calls.append(params)
+        return {"results": [existing] if params.get("groupname") == "Paper Boat" else []}
+
+    with patch.object(Orpheus, "_api_get", new=fake_get), patch("asyncio.sleep", new=AsyncMock()):
+        dupes = asyncio.run(_adapter().search_existing(meta))
+
+    assert calls[0] == {"action": "browse", "artistname": "Fictional Band", "groupname": "Paper Boat"}
+    assert dupes and dupes[0]["flags"][0].startswith(("DUPE", "LIKELY DUPE"))

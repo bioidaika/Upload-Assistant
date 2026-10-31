@@ -28,13 +28,17 @@ For scene WEB releases, `.nfo` sidecars are read as auxiliary, lower-confidence 
 
 ## Orpheus
 
-Configure the `TRACKERS["ORPHEUS"]` entry with an API token and announce URL. The adapter performs one narrow, read-only `browse` request for duplicate checking and builds the Gazelle upload fields only after the normal Upload Assistant confirmation workflow reaches the tracker.
+Configure the `TRACKERS["ORPHEUS"]` entry with an API token and announce URL. The adapter performs a few narrow, read-only `browse` requests for duplicate checking and builds the Gazelle upload fields only after the normal Upload Assistant confirmation workflow reaches the tracker.
 
 Orpheus's `image` field is optional, but artwork improves the catalog. MUSIC first selects a local `cover`/`front`/`folder` image when present, otherwise extracts a front-cover image embedded in FLAC, MP3 or MP4/M4A tags. After the normal user confirmation, it uploads that single local image through the configured image host (the Orpheus form recommends imgbb) and reuses its cached raw URL; a user-supplied link always takes precedence. Discogs, Facebook CDN, Photobucket and ptpimg artwork links are omitted because the Orpheus form disallows them. Debug never calls the image host and still prints a complete payload with the optional image field omitted.
 
 ### Edition information
 
 Orpheus keeps release information (year, label, catalogue number, title) in its edition fields. The edition year comes from `--music-edition-year`, `--music-release-year`, the retail date, or the initial year when it cannot predate the source medium (CD 1982, DVD 1996, SACD/WEB 1999, BD 2006). It is never guessed: when no concrete year exists, the upload stops and asks for one. If the release cannot be identified, pass `--music-unknown-release` to submit it as an Unknown Release (rule 2.1.19).
+
+A label, catalogue number or edition title found only in the folder name is not sent on its own. Interactive runs ask about each one before the upload is confirmed, and a confirmed value is used as if it had been passed with `--music-label`, `--music-catalogue-number` or `--edition`. Unattended runs leave it out and show a warning.
+
+Orpheus API requests are retried after timeouts, connection failures and rate-limit or server errors, up to `max_retries` attempts (set under `TRACKERS["ORPHEUS"]` or `DEFAULT`). The upload itself is retried only when Orpheus certainly did not receive it: the connection failed, or the site answered 429 or 503. After a read timeout or another server error the upload may already exist, so it is reported instead of repeated; check the site before uploading again.
 
 ### Preflight
 
@@ -57,10 +61,10 @@ Leading spaces, missing track numbers in file names, unnecessary nested folders 
 
 ### Duplicates, requests and logs
 
-The duplicate review lists each torrent in a matching group with its edition, medium, format, encoding and log score, and labels it as a dupe, a trump (lossy rule 2.2.9 or a log upgrade) or allowed to coexist. After a trump, report the old torrent (rule 2.2.3).
+The duplicate review lists each torrent in a matching group with its edition, medium, format, encoding and log score, and labels it as a dupe, a trump or allowed to coexist. A slot check box then recommends allow, block or review, as for video trackers (`DEFAULT["slot_rules"]` turns it off). It applies the dupe and trump rules: lossy bitrates and LAME presets, AAC, 16-bit and 24-bit FLAC sample rate tiers, vinyl slots, CD rip log scores, cue sheets, scene releases, cassettes, Unknown Releases and single-edition bootlegs (rules 2.2, 2.5, 2.6.2 and 2.10). When a torrent in the group may compete with the upload, one more read-only `torrentgroup` request reads the site's trumpable flags and the folder names, which usually show the sample rate. Unattended runs upload when the check allows it and skip when it blocks. After a trump, report the old torrent (rule 2.2.3).
 
 Request search (`-req`) compares open Music requests with the upload's format, bitrate, media, log and cue. To fill one, pass `--music-request-id ID_OR_URL`; the request is checked first and the upload stops if it is filled, mismatched or incompatible. `--music-group-id ID_OR_URL` adds the upload to an existing group after confirming the group title.
 
-`--music-check-log` sends each rip log to the Orpheus logchecker, which only scores it and changes nothing on the site, and shows the score, checksum state and deductions before uploading.
+`--music-check-log` sends each rip log to the Orpheus logchecker, which only scores it and changes nothing on the site, and shows the score, checksum state and deductions before uploading. For CD FLAC this runs during the duplicate review, so the slot check can decide log trumps.
 
 No API key, token or tracker response is written into the music snapshot or payload preview.
