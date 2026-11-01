@@ -557,12 +557,10 @@ class DupeChecker:
                 logger.debug(f"[cyan]Book duplicate matched: {each}")
                 return False
 
-            # AITHER / VIETMEDIAF trumping logic - no internal checking, if it's marked trumpable, it's trumpable
-            if tracker_name in ["AITHER", "LST", "VIETMEDIAF"] and entry.get("trumpable", False):
-                if not res_id or not target_resolution or target_resolution == res_id or (res_id in target_resolution or target_resolution in str(res_id)):
-                    meta.trumpable_id = entry.get("id")
-                    meta.trumpable_name = entry.get("name")
-                    remember_match("trumpable_id")
+            if meta.category == "MOVIE":
+                if re.search(r"\b[sS]\d{1,2}(?:[eE]\d{1,2})?\b|\b(?:season|series)\s*\d+\b", each, re.IGNORECASE):
+                    await log_exclusion("candidate has TV season/episode tag while upload is a Movie", each)
+                    return True
 
             if not meta.is_disc:
                 for file in filenames:
@@ -859,6 +857,16 @@ class DupeChecker:
             return False
 
         new_dupes = [each for each in processed_dupes if not await process_exclusion(each)]
+
+        # AITHER / VIETMEDIAF trumping logic - only candidates that PASSED all exclusion checks can be trumped
+        for entry in new_dupes:
+            if tracker_name in ["AITHER", "LST", "VIETMEDIAF"] and entry.get("trumpable", False):
+                entry_res = entry.get("res", None)
+                if not entry_res or not target_resolution or target_resolution == entry_res or (entry_res in target_resolution or target_resolution in str(entry_res)):
+                    meta.trumpable_id = entry.get("id")
+                    meta.trumpable_name = entry.get("name")
+                    remember_match("trumpable_id")
+                    break
 
         if is_exact_match_only:
             if processed_dupes and not new_dupes:

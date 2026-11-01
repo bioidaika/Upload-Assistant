@@ -469,6 +469,16 @@ class VietMediaF(UNIT3D):
                     entry["trumpable"] = False
                 continue
 
+            # Safeguard: Do not cross-trump between TV and Movie releases
+            if meta.category == "MOVIE" and re.search(r"\b[sS]\d{1,2}(?:[eE]\d{1,2})?\b|\b(?:season|series)\s*\d+\b", entry_name, re.IGNORECASE):
+                if entry.get("trumpable", False):
+                    entry["trumpable"] = False
+                continue
+            if meta.category == "TV" and not re.search(r"\b[sS]\d{1,2}\b|\b(?:season|series)\s*\d+\b", entry_name, re.IGNORECASE):
+                if entry.get("trumpable", False):
+                    entry["trumpable"] = False
+                continue
+
             # 1. Bad Release Group trumping
             if self._is_bad_release_group(entry_name) and not self._is_bad_release_group(upload_name):
                 entry["trumpable"] = True
@@ -505,11 +515,34 @@ class VietMediaF(UNIT3D):
                     f"has fewer Vietnamese audio tracks ({entry_vi_audio_count}) while your upload has {upload_vi_audio_count}. Marked as trumpable![/bold green]"
                 )
 
+    async def get_search_urls(self, meta: Meta, request_params: Any) -> list[tuple[str, Any, bool]]:
+        # Always scope search by category_id to prevent TMDB ID collisions
+        # between Movies and TV shows (e.g. TMDB 8358 is Cast Away [Movie] and Lie to Me [TV])
+        cat_info = await self.get_category_id(meta)
+        cat_id = cat_info.get("category_id")
+        if cat_id and cat_id != "0":
+            has_cat = any(k == "categories[]" for k, _ in request_params)
+            if not has_cat:
+                request_params = list(request_params)
+                request_params.append(("categories[]", cat_id))
+        return await super().get_search_urls(meta, request_params)
+
     async def search_existing(self, meta: Meta) -> list[dict[str, Any]]:
         dupes = await super().search_existing(meta)
+        # Filter out cross-category duplicates (e.g. TV results when searching for Movie)
+        if meta.category == "MOVIE":
+            dupes = [d for d in dupes if isinstance(d, dict) and not re.search(r"\b[sS]\d{1,2}(?:[eE]\d{1,2})?\b|\b(?:season|series)\s*\d+\b", str(d.get("name", "")), re.IGNORECASE)]
+        elif meta.category == "TV":
+            dupes = [d for d in dupes if isinstance(d, dict) and re.search(r"\b[sS]\d{1,2}\b|\b(?:season|series)\s*\d+\b", str(d.get("name", "")), re.IGNORECASE)]
+
         self._apply_vietnamese_trump_rules(meta, dupes)
         title_releases = meta.get(f"{self.tracker}_title_releases")
         if isinstance(title_releases, list):
+            if meta.category == "MOVIE":
+                title_releases = [d for d in title_releases if isinstance(d, dict) and not re.search(r"\b[sS]\d{1,2}(?:[eE]\d{1,2})?\b|\b(?:season|series)\s*\d+\b", str(d.get("name", "")), re.IGNORECASE)]
+            elif meta.category == "TV":
+                title_releases = [d for d in title_releases if isinstance(d, dict) and re.search(r"\b[sS]\d{1,2}\b|\b(?:season|series)\s*\d+\b", str(d.get("name", "")), re.IGNORECASE)]
+            meta[f"{self.tracker}_title_releases"] = title_releases
             self._apply_vietnamese_trump_rules(meta, title_releases)
         return dupes
 

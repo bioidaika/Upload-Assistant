@@ -805,3 +805,66 @@ def test_vietmediaf_build_trump_report_message_fewer_audio():
     assert "• Reported torrent: Movie.2024.1080p.BluRay.x264.ViE-DUB.1Audio-GRP (ID: 600)" in msg
     assert "• Trumping torrent: Movie.2024.1080p.BluRay.x264.ViE-DUB.2Audio-GRP (ID: 601)" in msg
     assert "release adds more Vietnamese audio tracks" in msg
+
+
+@pytest.mark.asyncio
+async def test_vietmediaf_get_search_urls_appends_category_id():
+    vmf = tracker()
+    meta_movie = Meta(category="MOVIE")
+    urls = await vmf.get_search_urls(meta_movie, [("tmdbId", "8358")])
+    assert any(k == "categories[]" and v == "1" for k, v in urls[0][1])
+
+    meta_tv = Meta(category="TV")
+    urls_tv = await vmf.get_search_urls(meta_tv, [("tmdbId", "8358")])
+    assert any(k == "categories[]" and v == "2" for k, v in urls_tv[0][1])
+
+
+def test_vietmediaf_no_cross_category_trump_movie_vs_tv():
+    vmf = tracker()
+    meta_upload = Meta(
+        name="Cast Away 2000 1080p AMZN WEB-DL DD+ 5.1 H.264-GPRS",
+        resolution="1080p",
+        category="MOVIE",
+        subtitle_languages=["vi"],
+    )
+    dupes = [
+        {
+            "id": 9198,
+            "name": "Lie to Me S02 1080p DSNP WEB-DL DD+ 5.1 H.264-playWEB",
+            "size": "20.0 GB",
+            "trumpable": True,
+        }
+    ]
+    vmf._apply_vietnamese_trump_rules(meta_upload, dupes)
+    assert dupes[0]["trumpable"] is False
+
+
+@pytest.mark.asyncio
+async def test_dupe_checking_excludes_tv_candidate_for_movie_upload():
+    from src.dupe_checking import DupeChecker
+
+    checker = DupeChecker(example_config)
+    meta = Meta(
+        name="Cast Away 2000 1080p AMZN WEB-DL DD+ 5.1 H.264-GPRS",
+        title="Cast Away",
+        year="2000",
+        resolution="1080p",
+        category="MOVIE",
+        type="WEBDL",
+        source="WEB-DL",
+        is_disc=None,
+    )
+    dupes = [
+        {
+            "id": 9198,
+            "name": "Lie to Me S02 1080p DSNP WEB-DL DD+ 5.1 H.264-playWEB",
+            "size": "20.0 GB",
+            "res": "1080p",
+            "type": "WEBDL",
+            "trumpable": True,
+        }
+    ]
+    filtered = await checker.filter_dupes(dupes, meta, "VIETMEDIAF")
+    assert len(filtered) == 0
+    assert meta.trumpable_id is None
+
