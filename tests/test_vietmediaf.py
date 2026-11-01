@@ -868,3 +868,37 @@ async def test_dupe_checking_excludes_tv_candidate_for_movie_upload():
     assert len(filtered) == 0
     assert meta.trumpable_id is None
 
+
+@pytest.mark.asyncio
+async def test_dupe_checking_records_trumpable_match_without_error():
+    from src.dupe_checking import DupeChecker
+
+    checker = DupeChecker(example_config)
+    meta = Meta(
+        name="Hostel 2006 Unrated 2160p UHD BluRay REMUX DV HDR HEVC DTS-HD MA 5.1-FraMeSToR",
+        title="Hostel",
+        year="2006",
+        resolution="2160p",
+        category="MOVIE",
+        type="REMUX",
+        source="BluRay",
+        hdr="DV HDR",
+        is_disc=None,
+    )
+    dupes = [
+        {
+            "id": 12902,
+            "name": "Hostel 2006 2160p UHD BluRay REMUX DV HDR HEVC DTS-HD MA 5.1-MALUS",
+            "size": "50.0 GB",
+            "res": "2160p",
+            "type": "REMUX",
+            "trumpable": True,
+        }
+    ]
+    filtered = await checker.filter_dupes(dupes, meta, "VIETMEDIAF")
+    assert len(filtered) == 1
+    assert meta.trumpable_id == 12902
+    assert meta.trumpable_name == "Hostel 2006 2160p UHD BluRay REMUX DV HDR HEVC DTS-HD MA 5.1-MALUS"
+    assert meta.get("VIETMEDIAF_matched_id") == 12902
+
+

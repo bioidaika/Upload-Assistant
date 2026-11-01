@@ -225,6 +225,26 @@ class DupeChecker:
         if is_usenet and meta.usenet_is_episode_submission:
             is_exact_match_only = True
 
+        def record_matched_dupe(matched_entry: DupeEntry, reason: str, matched_file_count: int | None = None) -> None:
+            """Persist details about the dupe that triggered a match for later use."""
+            matched_name_key = f"{tracker_name}_matched_name"
+            matched_link_key = f"{tracker_name}_matched_link"
+            matched_download_key = f"{tracker_name}_matched_download"
+            matched_reason_key = f"{tracker_name}_matched_reason"
+            matched_count_key = f"{tracker_name}_matched_file_count"
+            matched_torrent_id = f"{tracker_name}_matched_id"
+
+            meta[matched_name_key] = matched_entry.get("name")
+            if matched_entry.get("link"):
+                meta[matched_link_key] = matched_entry.get("link")
+            if matched_entry.get("download"):
+                meta[matched_download_key] = matched_entry.get("download")
+            meta[matched_reason_key] = reason
+            if matched_file_count:
+                meta[matched_count_key] = matched_file_count
+            if matched_entry.get("id"):
+                meta[matched_torrent_id] = matched_entry.get("id")
+
         async def log_exclusion(reason: str, item: str) -> None:
             if meta.debug:
                 logger.debug(f"[yellow]Excluding result due to {reason}: {item}")
@@ -320,24 +340,7 @@ class DupeChecker:
                 logger.debug(f"[debug] file_count: {file_count}")
 
             def remember_match(reason: str) -> None:
-                """Persist details about the dupe that triggered a match for later use."""
-                matched_name_key = f"{tracker_name}_matched_name"
-                matched_link_key = f"{tracker_name}_matched_link"
-                matched_download_key = f"{tracker_name}_matched_download"
-                matched_reason_key = f"{tracker_name}_matched_reason"
-                matched_count_key = f"{tracker_name}_matched_file_count"
-                matched_torrent_id = f"{tracker_name}_matched_id"
-
-                meta[matched_name_key] = entry.get("name")
-                if entry.get("link"):
-                    meta[matched_link_key] = entry.get("link")
-                if entry.get("download"):
-                    meta[matched_download_key] = entry.get("download")
-                meta[matched_reason_key] = reason
-                if file_count:
-                    meta[matched_count_key] = file_count
-                if entry.get("id"):
-                    meta[matched_torrent_id] = entry.get("id")
+                record_matched_dupe(entry, reason, file_count)
 
             if meta.category == "GAME":
                 target_title = meta.title or meta.name
@@ -865,7 +868,7 @@ class DupeChecker:
                 if not entry_res or not target_resolution or target_resolution == entry_res or (entry_res in target_resolution or target_resolution in str(entry_res)):
                     meta.trumpable_id = entry.get("id")
                     meta.trumpable_name = entry.get("name")
-                    remember_match("trumpable_id")
+                    record_matched_dupe(entry, "trumpable_id")
                     break
 
         if is_exact_match_only:
