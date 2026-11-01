@@ -1607,6 +1607,96 @@ class TrackerSetup:
             logger.info(f"[cyan]Payload: {payload}[/cyan]")
             return True
 
+    def _build_self_trumpable_report_message(
+        self,
+        meta: Meta,
+        tracker: str,
+        torrent_id: str | int,
+        tracker_instance: Any,
+    ) -> str:
+        torrent_name = meta.get(f"{tracker}_name") or meta.name or meta.title or "Unknown Release"
+        base_url = getattr(tracker_instance, "base_url", "").rstrip("/")
+        torrent_url = f"{base_url}/torrents/{torrent_id}" if base_url else f"Torrent ID: {torrent_id}"
+
+        reasons_list = meta.self_trumpable_reasons or ["Scene archive mismatch detected via srrDB."]
+        reasons_formatted = "\n".join(f"• {r}" for r in reasons_list)
+
+        return (
+            "Trumpable Request (Self-Report via Upload-Assistant):\n\n"
+            f"• Target torrent: {torrent_name}\n"
+            f"• Link: {torrent_url}\n"
+            f"• Detected issues:\n{reasons_formatted}\n\n"
+            "• Note: This release was uploaded in automated mode (-uaa) so that content is available to members. "
+            "The uploader requests staff to mark this release as trumpable to allow an untouched scene release "
+            "or proper P2P encode to trump/replace it."
+        )
+
+    async def make_self_trumpable_report(self, meta: Meta, tracker: str) -> bool:
+        """Create a self-report requesting staff to mark the newly uploaded torrent as trumpable."""
+        logger.debug(f"[bold green]Creating trumpable self-report on {tracker}[/bold green]")
+
+        tracker_instance = self._create_tracker_instance(tracker)
+        if not tracker_instance:
+            logger.info(f"[red]Tracker {tracker} is not registered in tracker_class_map[/red]")
+            return False
+
+        base_url = getattr(tracker_instance, "trumping_url", None)
+        if not isinstance(base_url, str):
+            logger.debug(f"Tracker {tracker} does not support trumping reports; skipping self-report.")
+            return False
+
+        status_map = meta.tracker_status or {}
+        tracker_status_info = status_map.get(tracker, {})
+        torrent_id = tracker_status_info.get("torrent_id")
+        if not torrent_id:
+            logger.info(f"[red]No torrent ID found in meta for newly uploaded torrent on {tracker}[/red]")
+            return False
+
+        if "/trumping-reports" not in base_url:
+            logger.debug(f"{tracker}: Trumping endpoint '{base_url}' does not support standalone self-reports.")
+            return False
+
+        create_url = base_url.replace("/filter", "/create")
+        tracker_config = self.config.get("TRACKERS", {}).get(tracker, {})
+        api_key = tracker_config.get("api_key", "").strip() if isinstance(tracker_config, dict) else ""
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+
+        message = self._build_self_trumpable_report_message(meta, tracker, torrent_id, tracker_instance)
+        payload: JsonDict = {
+            "reported_torrent_id": str(torrent_id),
+            "trumping_torrent_id": None,
+            "message": message,
+        }
+
+        if not meta.debug:
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    response = await client.post(url=create_url, headers=headers, json=payload)
+                    observe_tracker_response(self.config, meta, tracker, response)
+                    if response.status_code in (200, 201):
+                        logger.info(f"[bold green]Successfully submitted trumpable self-report on {tracker}[/bold green]")
+                        return True
+                    logger.info(f"[bold red]Failed to submit trumpable self-report. HTTP Status: {response.status_code}[/bold red]")
+                    return False
+            except httpx.TimeoutException:
+                logger.info("[bold red]Request timed out after 10 seconds[/bold red]")
+                return False
+            except httpx.RequestError as e:
+                logger.info(f"[bold red]HTTP Request failed: {e}[/bold red]")
+                return False
+            except Exception as e:
+                logger.error(f"[bold red]Unexpected error: {e}[/bold red]")
+                return False
+        else:
+            logger.info("[bold yellow]Debug mode enabled, skipping actual trumpable self-report creation.[/bold yellow]")
+            logger.info(f"[cyan]POST URL: {create_url}[/cyan]")
+            logger.info(f"[cyan]Payload: {payload}[/cyan]")
+            return True
+
 
 tracker_class_map: Any = LazyTrackerDict(
     {

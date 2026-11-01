@@ -141,7 +141,13 @@ class SceneManager:
                 return next(iter(matches.values())) if len(matches) == 1 else None
         return None
 
-    async def _warn_file_differences(self, video: str, release: str, details: dict[str, Any] | None) -> bool:
+    async def _warn_file_differences(
+        self,
+        video: str,
+        release: str,
+        details: dict[str, Any] | None,
+        reasons: list[str] | None = None,
+    ) -> bool:
         if not details:
             return False
         path = Path(video)
@@ -170,6 +176,8 @@ class SceneManager:
                     f"[yellow]SRRDB: Filename '{escape(path.name)}' is not listed in '{escape(release)}'. "
                     "Please confirm whether the file was renamed. File size could not be verified.[/yellow]"
                 )
+                if reasons is not None:
+                    reasons.append(f"Filename '{path.name}' is not listed in archived scene release '{release}'")
                 return True
             return False
 
@@ -180,6 +188,8 @@ class SceneManager:
                 f"[yellow]SRRDB: Filename differs from the archive: local '{escape(path.name)}', "
                 f"original '{escape(original_name)}'. Please confirm whether the file was renamed.[/yellow]"
             )
+            if reasons is not None:
+                reasons.append(f"Filename differs from archive: local '{path.name}' vs original '{original_name}' in '{release}'")
         expected_size = matches[0].get("size")
         if isinstance(expected_size, str) and expected_size.isdigit():
             expected_size = int(expected_size)
@@ -189,13 +199,29 @@ class SceneManager:
                 f"[yellow]SRRDB: File size mismatch for '{escape(path.name)}': local {local_stat.st_size} bytes, "
                 f"archived {expected_size} bytes ('{escape(original_name)}'). Please verify the file before uploading.[/yellow]"
             )
+            if reasons is not None:
+                reasons.append(
+                    f"File size mismatch for '{path.name}': local {local_stat.st_size} bytes vs archived {expected_size} bytes ('{original_name}') in '{release}'"
+                )
         return filename_differs or size_differs
 
     async def _confirm_file_differences(self, video: str, release: str, details: dict[str, Any] | None, meta: Meta) -> None:
-        if not await self._warn_file_differences(video, release, details):
+        reasons: list[str] = []
+        if not await self._warn_file_differences(video, release, details, reasons=reasons):
             return
         message = "Upload cancelled: srrDB filename or file size differences were not approved."
         if meta.unattended and not meta.unattended_confirm:
+            if meta.unattended_auto:
+                meta.self_trumpable_report = True
+                for r in reasons:
+                    if r not in meta.self_trumpable_reasons:
+                        meta.self_trumpable_reasons.append(r)
+                logger.warning(
+                    f"[yellow]SRRDB: File difference detected for '{escape(Path(video).name)}'. "
+                    "-uaa (--unattended_auto) is active: proceeding with upload and will automatically "
+                    "submit a trumpable request report.[/yellow]"
+                )
+                return
             raise SceneFileMismatchError(f"{message} Run with interactive confirmation to review them.")
         try:
             with webui_events.field_prompt(

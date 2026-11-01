@@ -3282,6 +3282,19 @@ async def do_the_thing(base_dir: str) -> None:
                 logger.info(f"[yellow]Submitting trumpable report to {tracker}.....")
                 await tracker_setup.make_trumpable_report(meta, tracker)
 
+            # Self-trumpable report: when -uaa detected a scene mismatch, report the
+            # newly uploaded torrent so staff can flag it as trumpable.
+            if meta.self_trumpable_report:
+                self_report_trackers = [t for t in cast(list[Any], meta.trackers) if isinstance(t, str)]
+                for tracker in self_report_trackers:
+                    status_map = meta.tracker_status or {}
+                    tracker_status_info = status_map.get(tracker, {})
+                    if not tracker_status_info.get("upload") or not tracker_status_info.get("torrent_id"):
+                        logger.debug(f"{tracker}: Skipping trumpable self-report because upload was not successful.")
+                        continue
+                    logger.info(f"[yellow]Submitting trumpable self-report to {tracker}.....")
+                    await tracker_setup.make_self_trumpable_report(meta, tracker)
+
             find_requests = config["DEFAULT"].get("search_requests", False) if meta.search_requests is None else meta.search_requests
             if find_requests and meta.trackers not in ([], None, "") and not (meta.site_check and not meta.is_disc):
                 logger.info("[green]Searching for requests on supported trackers.....")

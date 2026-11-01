@@ -213,6 +213,8 @@ def init_meta(prep_instance: Any, meta: Meta, mode: str) -> tuple[bool, bool, Cl
         meta.audio_languages = None
         meta.subtitle_languages = None
     meta.aither_trumpable = None
+    meta.self_trumpable_report = False
+    meta.self_trumpable_reasons = cast(list[str], [])
     meta.anime = False
     meta.subtitle_files = cast(list[str], [])
     meta.adult_media = False

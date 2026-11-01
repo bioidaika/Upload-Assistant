@@ -596,3 +596,94 @@ async def test_lowercase_srrdb_search_records_search_and_details(tmp_path: Path,
     assert scene is True
     assert len(client.requested_urls) == 2
     assert operations == ["search", "details"]
+
+
+@pytest.mark.asyncio
+async def test_unattended_auto_bypasses_scene_mismatch_and_flags_self_trumpable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With -uaa, srrDB size mismatch should NOT raise SceneFileMismatchError.
+
+    Instead it should flag meta.self_trumpable_report=True and proceed.
+    """
+    video = tmp_path / f"{_RELEASE}.mkv"
+    video.write_bytes(b"data")
+    client = _RoutedClient({
+        f"https://api.srrdb.com/v1/search/r:{_RELEASE}": _Response(
+            {"resultsCount": 1, "results": [{**_RESULT, "hasNFO": "no"}]}
+        ),
+        _DETAILS_URL: _Response({"archived-files": [{"name": f"{_BASENAME}.mkv", "size": 8}]}),
+    })
+    monkeypatch.setattr("src.is_scene.httpx.AsyncClient", lambda: client)
+    warnings: list[str] = []
+    monkeypatch.setattr("src.is_scene.logger.warning", warnings.append)
+    meta = Meta(
+        base_dir=str(tmp_path), uuid="scene-test", filename="Generic Title",
+        tag="-EXAMPLEGROUP", imdb_id=1234567,
+        debug=True, unattended=True, unattended_auto=True,
+    )
+    manager = SceneManager({"DEFAULT": {}})
+
+    result = await manager.is_scene(str(video), meta, 1234567)
+
+    # Should NOT raise SceneFileMismatchError
+    assert result[1] is True  # scene == True
+    assert meta.self_trumpable_report is True
+    assert len(meta.self_trumpable_reasons) >= 1
+    assert any("size mismatch" in r.lower() or "file size" in r.lower() for r in meta.self_trumpable_reasons)
+
+
+@pytest.mark.asyncio
+async def test_unattended_auto_filename_mismatch_flags_self_trumpable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With -uaa, a renamed file should flag meta.self_trumpable_report=True."""
+    video = tmp_path / f"{_RELEASE}.mkv"
+    video.write_bytes(b"data")
+    client = _RoutedClient({
+        f"https://api.srrdb.com/v1/search/r:{_RELEASE}": _Response(
+            {"resultsCount": 1, "results": [{**_RESULT, "hasNFO": "no"}]}
+        ),
+        _DETAILS_URL: _Response({"archived-files": [{"name": "original-name.mkv", "size": 4}]}),
+    })
+    monkeypatch.setattr("src.is_scene.httpx.AsyncClient", lambda: client)
+    warnings: list[str] = []
+    monkeypatch.setattr("src.is_scene.logger.warning", warnings.append)
+    meta = Meta(
+        base_dir=str(tmp_path), uuid="scene-test", filename="Generic Title",
+        tag="-EXAMPLEGROUP", imdb_id=1234567,
+        debug=True, unattended=True, unattended_auto=True,
+    )
+    manager = SceneManager({"DEFAULT": {}})
+
+    result = await manager.is_scene(str(video), meta, 1234567)
+
+    assert result[1] is True
+    assert meta.self_trumpable_report is True
+    assert any("not listed" in r.lower() or "filename" in r.lower() for r in meta.self_trumpable_reasons)
+
+
+@pytest.mark.asyncio
+async def test_unattended_without_auto_still_raises_on_scene_mismatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With -ua only (no -uaa), srrDB size mismatch should still raise."""
+    video = tmp_path / f"{_RELEASE}.mkv"
+    video.write_bytes(b"data")
+    client = _RoutedClient({
+        f"https://api.srrdb.com/v1/search/r:{_RELEASE}": _Response(
+            {"resultsCount": 1, "results": [{**_RESULT, "hasNFO": "no"}]}
+        ),
+        _DETAILS_URL: _Response({"archived-files": [{"name": f"{_BASENAME}.mkv", "size": 8}]}),
+    })
+    monkeypatch.setattr("src.is_scene.httpx.AsyncClient", lambda: client)
+    meta = Meta(
+        base_dir=str(tmp_path), uuid="scene-test", filename="Generic Title",
+        tag="-EXAMPLEGROUP", imdb_id=1234567,
+        debug=True, unattended=True, unattended_auto=False,
+    )
+    manager = SceneManager({"DEFAULT": {}})
+
+    with pytest.raises(SceneFileMismatchError, match="Upload cancelled"):
+        await manager.is_scene(str(video), meta, 1234567)
+    assert meta.self_trumpable_report is False

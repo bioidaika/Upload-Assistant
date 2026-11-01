@@ -527,6 +527,8 @@ class Meta:
     tmdb: int | None = None
     tonemapped: bool = False
     torrent_comments: list[Any] = field(default_factory=list)
+    self_trumpable_report: bool = False
+    self_trumpable_reasons: list[str] = field(default_factory=list)
     tracker_image_collections: dict[str, dict[str, list[dict[str, Any]]]] = field(default_factory=dict)
     tracker_status: dict[str, Any] = field(default_factory=dict)
     trackers_pass: int | None = None
