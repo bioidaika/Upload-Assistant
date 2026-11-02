@@ -868,7 +868,10 @@ class DupeChecker:
                 if not entry_res or not target_resolution or target_resolution == entry_res or (entry_res in target_resolution or target_resolution in str(entry_res)):
                     meta.trumpable_id = entry.get("id")
                     meta.trumpable_name = entry.get("name")
-                    record_matched_dupe(entry, "trumpable_id")
+                    meta[f"{tracker_name}_trumpable_id"] = entry.get("id")
+                    meta[f"{tracker_name}_trumpable_name"] = entry.get("name")
+                    if entry.get("trump_reason"):
+                        meta[f"{tracker_name}_trump_reason"] = entry.get("trump_reason")
                     break
 
         if is_exact_match_only:

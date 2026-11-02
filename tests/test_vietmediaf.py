@@ -899,6 +899,67 @@ async def test_dupe_checking_records_trumpable_match_without_error():
     assert len(filtered) == 1
     assert meta.trumpable_id == 12902
     assert meta.trumpable_name == "Hostel 2006 2160p UHD BluRay REMUX DV HDR HEVC DTS-HD MA 5.1-MALUS"
-    assert meta.get("VIETMEDIAF_matched_id") == 12902
+    assert meta.get("VIETMEDIAF_trumpable_id") == 12902
+    assert meta.get("VIETMEDIAF_trumpable_name") == "Hostel 2006 2160p UHD BluRay REMUX DV HDR HEVC DTS-HD MA 5.1-MALUS"
+    assert meta.get("VIETMEDIAF_matched_download") is None
+
+
+@pytest.mark.asyncio
+async def test_trumpable_candidate_does_not_clobber_cross_seed_match():
+    from src.dupe_checking import DupeChecker
+    from src.uphelper import UploadHelper
+
+    filename = "Hostel.2006.Unrated.UHD.BluRay.2160p.DTS-HD.MA.5.1.DV.HEVC.REMUX-FraMeSToR.mkv"
+    checker = DupeChecker(example_config)
+    meta = Meta(
+        name="Hostel 2006 Unrated 2160p UHD BluRay REMUX DV HDR HEVC DTS-HD MA 5.1-FraMeSToR",
+        title="Hostel",
+        year="2006",
+        resolution="2160p",
+        category="MOVIE",
+        type="REMUX",
+        source="BluRay",
+        hdr="DV HDR",
+        is_disc=None,
+        filelist=[f"/downloads/{filename}"],
+    )
+    dupes = [
+        {
+            "id": 12902,
+            "name": "Hostel 2006 2160p UHD BluRay REMUX DV HDR HEVC DTS-HD MA 5.1-MALUS",
+            "size": "50.0 GB",
+            "res": "2160p",
+            "type": "REMUX",
+            "download": "https://tracker.vietmediaf.store/torrents/download/12902.torrent",
+            "trumpable": True,
+        },
+        {
+            "id": 12890,
+            "name": "Hostel 2006 Unrated 2160p UHD BluRay REMUX DV HDR HEVC DTS-HD MA 5.1-FraMeSToR",
+            "size": "62.3 GB",
+            "res": "2160p",
+            "type": "REMUX",
+            "download": "https://tracker.vietmediaf.store/torrents/download/12890.torrent",
+            "files": [filename],
+            "file_count": 1,
+            "trumpable": False,
+        },
+    ]
+    filtered = await checker.filter_dupes(dupes, meta, "VIETMEDIAF")
+    # Both are non-excluded dupes
+    assert len(filtered) == 2
+    # Trumpable info correctly points to MALUS
+    assert meta.trumpable_id == 12902
+    assert meta.get("VIETMEDIAF_trumpable_id") == 12902
+    # Matched cross-seed info correctly points to FraMeSToR, NOT MALUS!
+    assert meta.get("VIETMEDIAF_matched_id") == 12890
+    assert meta.get("VIETMEDIAF_matched_download") == "https://tracker.vietmediaf.store/torrents/download/12890.torrent"
+
+    # Now verify dupe_check in uphelper selects FraMeSToR for cross-seed
+    helper = UploadHelper(example_config)
+    meta.unattended = True
+    is_dupe, updated_meta = await helper.dupe_check(filtered, meta, "VIETMEDIAF")
+    assert meta.get("VIETMEDIAF_cross_seed") == "https://tracker.vietmediaf.store/torrents/download/12890.torrent"
+
 
 

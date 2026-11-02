@@ -826,7 +826,7 @@ class UploadHelper:
                 if region and region in display_name:
                     display_name = display_name.replace(f"{region} ", "")
             for d in dupes_list:
-                if isinstance(d, dict):
+                if isinstance(d, dict) and not d.get("trumpable"):
                     entry_name = str(d.get("name", "")).lower()
                     similarity = SequenceMatcher(None, entry_name, display_name.lower().strip()).ratio()
                     if similarity > 0.9 and meta.size_match and tracker_download_link:
@@ -838,16 +838,23 @@ class UploadHelper:
             logger.debug(f"[yellow]{tracker_name} filename and file count cross seeding check[/yellow]")
             tracker_download_link = meta.get(f"{tracker_name}_matched_download")
             for d in dupes_list:
-                if isinstance(d, dict) and tracker_download_link:
-                    meta[f"{tracker_name}_cross_seed"] = tracker_download_link
-                    logger.debug(f"[bold red]Cross-seed link saved for {tracker_name}: {Redaction.redact_private_info(tracker_download_link)}.[/bold red]")
-                    break
+                if isinstance(d, dict) and not d.get("trumpable"):
+                    matched_name = meta.get(f"{tracker_name}_matched_name")
+                    link = (
+                        d.get("download")
+                        if matched_name and str(d.get("name", "")).lower() == str(matched_name).lower() and d.get("download")
+                        else tracker_download_link
+                    )
+                    if link:
+                        meta[f"{tracker_name}_cross_seed"] = link
+                        logger.debug(f"[bold red]Cross-seed link saved for {tracker_name}: {Redaction.redact_private_info(link)}.[/bold red]")
+                        break
 
         elif meta.size_match:
             logger.debug(f"[yellow]{tracker_name} size cross seeding check[/yellow]")
             tracker_download_link = meta.get(f"{tracker_name}_matched_download")
             for d in dupes_list:
-                if isinstance(d, dict):
+                if isinstance(d, dict) and not d.get("trumpable"):
                     entry_name = str(d.get("name", "")).lower()
                     similarity = SequenceMatcher(None, entry_name, display_name.lower().strip()).ratio()
                     logger.debug(f"[debug] Comparing sizes with similarity {similarity:.4f}")
