@@ -18,6 +18,7 @@ from src.get_desc import DescriptionBuilder
 from src.mediainfo import strip_report_by_line
 from src.meta import Meta
 from src.rehostimages import ImageHostPolicy, RehostImagesManager
+from src.release_locks import release_image_lock
 from src.takescreens import download_artwork_from_meta
 from src.temp_paths import artwork_dir
 from src.tracker_images import ImageCollection, get_tracker_image_collection
@@ -366,7 +367,7 @@ class CathodeRayTube:
             if media_info:
                 sections.append(f"[details]\n[mediainfo]\n{media_info}\n[/mediainfo]\n[/details]")
 
-        sections.append(f"\n[align=right][url=https://github.com/wastaken7/Upload-Assistant][size=1]{meta.ua_signature}[/size][/url][/align]")
+        sections.append(f"\n[align=right][url=https://github.com/wastaken7/Upload-Assistant][size=0]{meta.ua_signature}[/size][/url][/align]")
 
         description_str: str = "\n".join(part for part in sections if part.strip())
 
@@ -630,7 +631,9 @@ class CathodeRayTube:
         if cookie_jar:
             self.session.cookies = cookie_jar
 
-        await self._host_cover(meta)
+        # Hosting switches meta.imghost while other trackers may be hosting images.
+        async with release_image_lock(meta):
+            await self._host_cover(meta)
         auth = CathodeRayTube.auth_token
         if not auth:
             meta.tracker_status[self.tracker]["status_message"] = "data error: Failed to load authenticated upload form."
