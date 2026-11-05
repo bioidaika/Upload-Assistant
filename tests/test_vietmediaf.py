@@ -963,3 +963,104 @@ async def test_trumpable_candidate_does_not_clobber_cross_seed_match():
 
 
 
+
+
+def test_vietmediaf_trumping_rule_subtitles_requires_mediainfo():
+    vmf = tracker()
+    meta_upload = Meta(
+        name="Movie.2024.1080p.AMZN.WEB-DL.DDP5.1.H.264-GRP",
+        resolution="1080p",
+        category="MOVIE",
+        subtitle_languages=["vi"],
+    )
+    # Target entry has NO media_info (e.g. API fetch failed)
+    dupes = [
+        {
+            "id": 1001,
+            "name": "Movie.2024.1080p.AMZN.WEB-DL.DDP5.1.H.264-OLD",
+            "media_info": None,
+            "trumpable": False,
+        }
+    ]
+    vmf._apply_vietnamese_trump_rules(meta_upload, dupes)
+    # Must NOT trump because MediaInfo is unavailable
+    assert dupes[0]["trumpable"] is False
+
+
+def test_vietmediaf_trumping_rule_audio_count_requires_mediainfo():
+    vmf = tracker()
+    meta_upload = Meta(
+        name="Movie.2024.ViE.1080p.AMZN.WEB-DL.DDP5.1.H.264-GRP",
+        resolution="1080p",
+        category="MOVIE",
+        mediainfo={
+            "media": {
+                "track": [
+                    {"@type": "Audio", "Title": "Thuyet Minh"},
+                    {"@type": "Audio", "Title": "Long Tieng"},
+                ]
+            }
+        },
+    )
+    # Target entry has no media_info
+    dupes = [
+        {
+            "id": 1002,
+            "name": "Movie.2024.ViE.1080p.AMZN.WEB-DL.DDP5.1.H.264-OLD",
+            "media_info": None,
+            "trumpable": False,
+        }
+    ]
+    vmf._apply_vietnamese_trump_rules(meta_upload, dupes)
+    # Must NOT trump because MediaInfo is unavailable
+    assert dupes[0]["trumpable"] is False
+
+
+def test_vietmediaf_slot_rules_subtitles_requires_parsed_existing_subtitles():
+    from src.slot_rules.trackers.vietmediaf import VietMediaFSlotRules
+    from src.slot_rules.models import Verdict
+    from src.slot_rules.profile import ReleaseProfile, WEBDL, H264
+
+    rules = VietMediaFSlotRules(Meta(category="MOVIE"))
+    upload = ReleaseProfile(
+        name="Movie.2024.1080p.AMZN.WEB-DL.DDP5.1.H.264-NEW",
+        resolution="1080p",
+        kind=WEBDL,
+        codec=H264,
+        subtitle_languages=frozenset({"vi", "en"}),
+    )
+    # Existing release MediaInfo was missing, so subtitle_languages is None (not frozenset)
+    existing = ReleaseProfile(
+        name="Movie.2024.1080p.AMZN.WEB-DL.DDP5.1.H.264-OLD",
+        resolution="1080p",
+        kind=WEBDL,
+        codec=H264,
+        subtitle_languages=None,
+    )
+
+    decision = rules.evaluate(upload, [existing])
+    assert decision is not None
+    # Must NOT allow trumping without confirmed MediaInfo
+    assert decision.verdict == Verdict.BLOCK
+
+
+@pytest.mark.asyncio
+async def test_unit3d_fill_torrent_details_retries_and_marks_failed():
+    import httpx
+    vmf = tracker()
+    entries = [{"id": 999, "media_info": None}]
+    
+    attempts = 0
+    def handler(request):
+        nonlocal attempts
+        attempts += 1
+        raise httpx.ConnectTimeout("Connection timed out")
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        await vmf._fill_torrent_details(client, {}, entries)
+
+    # Must have attempted 3 times
+    assert attempts == 3
+    # Must mark details_failed=True
+    assert entries[0].get("details_failed") is True

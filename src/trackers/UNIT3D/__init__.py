@@ -357,17 +357,46 @@ class UNIT3D:
             return
         if len(entries) > MAX_TORRENT_DETAIL_REQUESTS:
             logger.debug(f"{self.tracker}: fetching details for the first {MAX_TORRENT_DETAIL_REQUESTS} of {len(entries)} results")
+        max_retries = 3
+        retry_delay = 2.0
         for index, entry in enumerate(entries[:MAX_TORRENT_DETAIL_REQUESTS]):
             if index:
                 # Sequential and spaced out to stay well within API rate limits.
                 await asyncio.sleep(0.5)
-            try:
-                response = await client.get(f"{detail_base}/{entry['id']}", headers=headers)
-                response.raise_for_status()
-                data = response.json()
-            except (httpx.HTTPError, ValueError) as e:
-                logger.debug(f"{self.tracker}: could not fetch details for torrent {entry['id']}: {e}")
+            torrent_id = entry.get("id")
+            if not torrent_id:
                 continue
+            data = None
+            for attempt in range(max_retries):
+                try:
+                    response = await client.get(f"{detail_base}/{torrent_id}", headers=headers)
+                    if response.status_code == 429:
+                        retry_after = response.headers.get("Retry-After")
+                        try:
+                            delay = max(1.0, float(retry_after)) if retry_after else 5.0
+                        except (ValueError, TypeError):
+                            delay = 5.0
+                        logger.warning(
+                            f"{self.tracker}: [yellow]Rate limit (429) hit while fetching torrent {torrent_id} details. "
+                            f"Retrying in {delay:.1f}s... (attempt {attempt + 1}/{max_retries})[/yellow]"
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+                    response.raise_for_status()
+                    data = response.json()
+                    break
+                except (httpx.HTTPError, ValueError) as e:
+                    if attempt < max_retries - 1:
+                        logger.debug(
+                            f"{self.tracker}: error fetching details for torrent {torrent_id}: {e}. "
+                            f"Retrying in {retry_delay:.1f}s... (attempt {attempt + 1}/{max_retries})"
+                        )
+                        await asyncio.sleep(retry_delay)
+                    else:
+                        logger.warning(
+                            f"[yellow]{self.tracker}: Failed to fetch details for torrent {torrent_id} after {max_retries} attempts: {e}[/yellow]"
+                        )
+                        entry["details_failed"] = True
             if not isinstance(data, dict):
                 continue
             payload = cast(dict[str, Any], data)

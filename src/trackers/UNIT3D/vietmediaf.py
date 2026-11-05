@@ -333,6 +333,11 @@ class VietMediaF(UNIT3D):
         return False
 
     @classmethod
+    def _entry_has_mediainfo(cls, entry: dict[str, Any]) -> bool:
+        media_info = entry.get("media_info") or entry.get("bd_info")
+        return bool(isinstance(media_info, str) and media_info.strip())
+
+    @classmethod
     def _has_vietnamese_subtitles_entry(cls, entry: dict[str, Any]) -> bool:
         raw_subs = entry.get("subtitle_languages") or []
         subs = [raw_subs] if isinstance(raw_subs, str) else raw_subs
@@ -490,30 +495,43 @@ class VietMediaF(UNIT3D):
                 continue
 
             # 2. Subtitle trumping within same slot (Original, ViE, ViE DUB)
-            if has_vi_sub_upload and not self._has_vietnamese_subtitles_entry(entry):
-                entry["trumpable"] = True
-                entry["trump_reason"] = "missing_vietnamese_subtitles"
-                logger.info(
-                    f"[bold green]{self.tracker}: Torrent {entry.get('id')} ({entry_name}) "
-                    f"lacks Vietnamese subtitles while your upload includes them. Marked as trumpable![/bold green]"
-                )
-                continue
+            if has_vi_sub_upload:
+                if not self._entry_has_mediainfo(entry):
+                    logger.debug(
+                        f"{self.tracker}: Cannot confirm if torrent {entry.get('id')} ({entry_name}) "
+                        f"lacks Vietnamese subtitles because MediaInfo is unavailable. Trumping skipped for safety."
+                    )
+                elif not self._has_vietnamese_subtitles_entry(entry):
+                    entry["trumpable"] = True
+                    entry["trump_reason"] = "missing_vietnamese_subtitles"
+                    logger.info(
+                        f"[bold green]{self.tracker}: Torrent {entry.get('id')} ({entry_name}) "
+                        f"lacks Vietnamese subtitles while your upload includes them. Marked as trumpable![/bold green]"
+                    )
+                    continue
 
             # 3. Audio track count trumping within ViE / ViE DUB slots
-            entry_vi_audio_count = self._count_vietnamese_audio_tracks_entry(entry)
-            if upload_slot in ("ViE", "ViE DUB") and (
-                (has_dual_vi_upload and not self._has_dual_vietnamese_audio_entry(entry))
-                or (upload_vi_audio_count > entry_vi_audio_count)
-            ):
-                entry["trumpable"] = True
-                if has_dual_vi_upload and not self._has_dual_vietnamese_audio_entry(entry):
-                    entry["trump_reason"] = "missing_dual_vietnamese_audio"
+            if upload_slot in ("ViE", "ViE DUB"):
+                if not self._entry_has_mediainfo(entry):
+                    logger.debug(
+                        f"{self.tracker}: Cannot compare Vietnamese audio tracks for torrent {entry.get('id')} ({entry_name}) "
+                        f"because MediaInfo is unavailable. Trumping skipped for safety."
+                    )
                 else:
-                    entry["trump_reason"] = "fewer_vietnamese_audio_tracks"
-                logger.info(
-                    f"[bold green]{self.tracker}: Torrent {entry.get('id')} ({entry_name}) "
-                    f"has fewer Vietnamese audio tracks ({entry_vi_audio_count}) while your upload has {upload_vi_audio_count}. Marked as trumpable![/bold green]"
-                )
+                    entry_vi_audio_count = self._count_vietnamese_audio_tracks_entry(entry)
+                    if (
+                        (has_dual_vi_upload and not self._has_dual_vietnamese_audio_entry(entry))
+                        or (upload_vi_audio_count > entry_vi_audio_count)
+                    ):
+                        entry["trumpable"] = True
+                        if has_dual_vi_upload and not self._has_dual_vietnamese_audio_entry(entry):
+                            entry["trump_reason"] = "missing_dual_vietnamese_audio"
+                        else:
+                            entry["trump_reason"] = "fewer_vietnamese_audio_tracks"
+                        logger.info(
+                            f"[bold green]{self.tracker}: Torrent {entry.get('id')} ({entry_name}) "
+                            f"has fewer Vietnamese audio tracks ({entry_vi_audio_count}) while your upload has {upload_vi_audio_count}. Marked as trumpable![/bold green]"
+                        )
 
     async def get_search_urls(self, meta: Meta, request_params: Any) -> list[tuple[str, Any, bool]]:
         # Always scope search by category_id to prevent TMDB ID collisions
