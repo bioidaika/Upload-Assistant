@@ -814,7 +814,17 @@ class UploadHelper:
         display_name = display_name if display_name is not None else meta.name
         display_name = display_name
 
-        if tracker_name in ["BEYONDHD"]:
+        if slot_decision and slot_decision.reason == "This exact release is already on the site." and slot_decision.conflicts:
+            exact_conflict = slot_decision.conflicts[0]
+            if isinstance(exact_conflict, dict) and exact_conflict.get("download"):
+                exact_link = exact_conflict.get("download")
+                meta[f"{tracker_name}_cross_seed"] = exact_link
+                meta[f"{tracker_name}_matched_download"] = exact_link
+                if exact_conflict.get("name"):
+                    meta[f"{tracker_name}_matched_name"] = exact_conflict.get("name")
+                logger.debug(f"[bold red]Cross-seed link saved for {tracker_name} from exact slot match: {Redaction.redact_private_info(exact_link)}.[/bold red]")
+
+        elif tracker_name in ["BEYONDHD"]:
             logger.debug("[yellow]BEYONDHD cross seeding check[/yellow]")
             tracker_download_link = meta.get(f"{tracker_name}_matched_download")
             # Ensure display_name is a string before using 'in' operator
@@ -837,31 +847,37 @@ class UploadHelper:
         elif meta.filename_match and meta.file_count_match:
             logger.debug(f"[yellow]{tracker_name} filename and file count cross seeding check[/yellow]")
             tracker_download_link = meta.get(f"{tracker_name}_matched_download")
-            for d in dupes_list:
-                if isinstance(d, dict) and not d.get("trumpable"):
-                    matched_name = meta.get(f"{tracker_name}_matched_name")
-                    link = (
-                        d.get("download")
-                        if matched_name and str(d.get("name", "")).lower() == str(matched_name).lower() and d.get("download")
-                        else tracker_download_link
-                    )
-                    if link:
-                        meta[f"{tracker_name}_cross_seed"] = link
-                        logger.debug(f"[bold red]Cross-seed link saved for {tracker_name}: {Redaction.redact_private_info(link)}.[/bold red]")
-                        break
+            matched_name = meta.get(f"{tracker_name}_matched_name")
+            target_link = None
+            if matched_name:
+                for d in dupes_list:
+                    if isinstance(d, dict) and not d.get("trumpable"):
+                        if str(d.get("name", "")).lower() == str(matched_name).lower() and d.get("download"):
+                            target_link = d.get("download")
+                            break
+            if not target_link and tracker_download_link:
+                target_link = tracker_download_link
+            if target_link:
+                meta[f"{tracker_name}_cross_seed"] = target_link
+                logger.debug(f"[bold red]Cross-seed link saved for {tracker_name}: {Redaction.redact_private_info(target_link)}.[/bold red]")
 
         elif meta.size_match:
             logger.debug(f"[yellow]{tracker_name} size cross seeding check[/yellow]")
             tracker_download_link = meta.get(f"{tracker_name}_matched_download")
+            target_link = None
             for d in dupes_list:
                 if isinstance(d, dict) and not d.get("trumpable"):
                     entry_name = str(d.get("name", "")).lower()
                     similarity = SequenceMatcher(None, entry_name, display_name.lower().strip()).ratio()
                     logger.debug(f"[debug] Comparing sizes with similarity {similarity:.4f}")
-                    if similarity > 0.9 and tracker_download_link:
-                        meta[f"{tracker_name}_cross_seed"] = tracker_download_link
-                        logger.debug(f"[bold red]Cross-seed link saved for {tracker_name}: {Redaction.redact_private_info(tracker_download_link)}.[/bold red]")
+                    if similarity > 0.9 and d.get("download"):
+                        target_link = d.get("download")
                         break
+            if not target_link and tracker_download_link:
+                target_link = tracker_download_link
+            if target_link:
+                meta[f"{tracker_name}_cross_seed"] = target_link
+                logger.debug(f"[bold red]Cross-seed link saved for {tracker_name}: {Redaction.redact_private_info(target_link)}.[/bold red]")
 
         if upload is False:
             return True, meta

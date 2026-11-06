@@ -234,10 +234,15 @@ class DupeChecker:
             matched_count_key = f"{tracker_name}_matched_file_count"
             matched_torrent_id = f"{tracker_name}_matched_id"
 
+            existing_reason = meta.get(matched_reason_key)
+            # An exact match (by filename or exact release detection) must not be clobbered by looser matches
+            if existing_reason in ("filename", "exact_match") and reason not in ("filename", "exact_match"):
+                return
+
             meta[matched_name_key] = matched_entry.get("name")
             if matched_entry.get("link"):
                 meta[matched_link_key] = matched_entry.get("link")
-            if matched_entry.get("download"):
+            if matched_entry.get("download") and reason != "season_pack_contains_episode":
                 meta[matched_download_key] = matched_entry.get("download")
             meta[matched_reason_key] = reason
             if matched_file_count:
@@ -746,8 +751,11 @@ class DupeChecker:
                 season_episode_match, is_season = await DupeChecker.is_season_episode_match(normalized, target_season, target_episode)
                 logger.debug(f"[debug] Season/Episode match result: {season_episode_match}")
                 logger.debug(f"[debug] is_season: {is_season}")
-                # AITHER / VIETMEDIAF episode trumping logic
-                if is_season and tracker_name in ["AITHER", "LST", "VIETMEDIAF"]:
+                # AITHER / VIETMEDIAF episode trumping logic:
+                # Season pack uploads can trump individual episodes, but NOT competing season packs.
+                # An entry is an individual episode only if it contains an episode identifier (e.g. E01).
+                is_candidate_episode = bool(re.search(r"[eE]\d{1,3}", each))
+                if is_season and is_candidate_episode and tracker_name in ["AITHER", "LST", "VIETMEDIAF"]:
                     # Null-safe normalization for comparisons
                     target_source_lower = (target_source or "").lower()
                     type_id_lower = (type_id or "").lower()

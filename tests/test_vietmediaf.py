@@ -1064,3 +1064,73 @@ async def test_unit3d_fill_torrent_details_retries_and_marks_failed():
     assert attempts == 3
     # Must mark details_failed=True
     assert entries[0].get("details_failed") is True
+
+
+@pytest.mark.asyncio
+async def test_season_pack_exact_match_not_clobbered_by_competing_season_pack():
+    from src.dupe_checking import DupeChecker
+    from src.uphelper import UploadHelper
+    from src.slot_rules.base import SlotDecision, Verdict
+
+    filename = "House.of.Cards.US.S05E01.2160p.NF.WEB-DL.DTS-HD.MA.5.1.H.265-Kitsune.mkv"
+    checker = DupeChecker(example_config)
+    meta = Meta(
+        name="House of Cards S05 2160p NF WEB-DL DTS-HD MA 5.1 H.265-Kitsune",
+        title="House of Cards",
+        year="2013",
+        season="S05",
+        episode="",
+        resolution="2160p",
+        category="TV",
+        type="WEBDL",
+        source="Web",
+        is_disc=None,
+        filelist=[f"/downloads/{filename}"],
+    )
+    dupes = [
+        {
+            "id": 101,
+            "name": "House of Cards S05 2160p NF WEB-DL DTS-HD MA 5.1 H.265-Kitsune",
+            "size": "118.8 GB",
+            "res": "2160p",
+            "type": "WEBDL",
+            "download": "https://tracker.vietmediaf.store/torrents/download/101.torrent",
+            "files": [filename],
+            "file_count": 1,
+            "trumpable": False,
+        },
+        {
+            "id": 102,
+            "name": "House of Cards US S05 2160p Netflix WEB-DL DD5.1 HEVC-TrollUHD",
+            "size": "118.8 GB",
+            "res": "2160p",
+            "type": "WEBDL",
+            "download": "https://tracker.vietmediaf.store/torrents/download/102.torrent",
+            "files": ["House.of.Cards.US.S05E01.2160p.Netflix.WEB-DL.DD5.1.HEVC-TrollUHD.mkv"],
+            "file_count": 1,
+            "trumpable": False,
+        },
+    ]
+
+    filtered = await checker.filter_dupes(dupes, meta, "VIETMEDIAF")
+    assert len(filtered) == 2
+    # Verify TrollUHD was NOT treated as an episode to trump
+    assert not meta.get("VIETMEDIAF_matched_episode_ids")
+    # Verify matched download and name point strictly to Kitsune, not TrollUHD!
+    assert meta.get("VIETMEDIAF_matched_id") == 101
+    assert meta.get("VIETMEDIAF_matched_name") == "House of Cards S05 2160p NF WEB-DL DTS-HD MA 5.1 H.265-Kitsune"
+    assert meta.get("VIETMEDIAF_matched_download") == "https://tracker.vietmediaf.store/torrents/download/101.torrent"
+
+    # Now verify dupe_check in uphelper sets cross_seed to Kitsune
+    helper = UploadHelper(example_config)
+    meta.unattended = True
+    from datetime import date
+    slot_decision = SlotDecision(
+        verdict=Verdict.BLOCK,
+        reason="This exact release is already on the site.",
+        tracker="VIETMEDIAF",
+        rules_date=date(2026, 10, 15),
+        conflicts=[dupes[0]],
+    )
+    is_dupe, updated_meta = await helper.dupe_check(filtered, meta, "VIETMEDIAF", slot_decision)
+    assert meta.get("VIETMEDIAF_cross_seed") == "https://tracker.vietmediaf.store/torrents/download/101.torrent"
