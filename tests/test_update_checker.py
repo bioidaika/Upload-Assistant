@@ -22,7 +22,7 @@ def test_remote_version_rejects_non_https_url(monkeypatch) -> None:
 def test_fetch_unreleased_changes_returns_safe_latest_first_commits(monkeypatch) -> None:
     payload = {
         "ahead_by": 2,
-        "html_url": "https://github.com/wastaken7/Upload-Assistant/compare/v3.9...development",
+        "html_url": "https://github.com/bioidaika/Upload-Assistant/compare/v3.9...development",
         "commits": [
             {
                 "sha": "aaaaaaaa",
@@ -36,7 +36,7 @@ def test_fetch_unreleased_changes_returns_safe_latest_first_commits(monkeypatch)
             },
             {
                 "sha": "bbbbbbbb",
-                "html_url": "https://github.com/wastaken7/Upload-Assistant/commit/bbbbbbbb",
+                "html_url": "https://github.com/bioidaika/Upload-Assistant/commit/bbbbbbbb",
                 "author": None,
                 "commit": {
                     "message": "fix(webui): second change",
@@ -61,7 +61,7 @@ def test_fetch_unreleased_changes_returns_safe_latest_first_commits(monkeypatch)
     assert result["commits"][0]["author"] == "Second Author"
     assert result["commits"][1]["summary"] == "feat(core): first change"
     assert result["commits"][1]["commit_url"] == (
-        "https://github.com/wastaken7/Upload-Assistant/commit/aaaaaaaa"
+        "https://github.com/bioidaika/Upload-Assistant/commit/aaaaaaaa"
     )
 
 
@@ -162,7 +162,7 @@ def test_changelog_history_fetches_and_reuses_cache(tmp_path, monkeypatch) -> No
             "version": "v2.0",
             "title": "Version 2.0",
             "changelog": "* feat(webui): add changelog viewer",
-            "release_url": "https://github.com/wastaken7/Upload-Assistant/releases/tag/v2.0",
+            "release_url": "https://github.com/bioidaika/Upload-Assistant/releases/tag/v2.0",
             "published_at": "2026-08-29T00:00:00Z",
             "prerelease": False,
         }
@@ -171,14 +171,14 @@ def test_changelog_history_fetches_and_reuses_cache(tmp_path, monkeypatch) -> No
         "available": True,
         "base_version": "v2.0",
         "branch": "development",
-        "compare_url": "https://github.com/wastaken7/Upload-Assistant/compare/v2.0...development",
+        "compare_url": "https://github.com/bioidaika/Upload-Assistant/compare/v2.0...development",
         "ahead_by": 1,
         "commits": [
             {
                 "sha": "abcdef1234567890",
                 "short_sha": "abcdef1",
                 "summary": "feat(webui): show unreleased changes",
-                "commit_url": "https://github.com/wastaken7/Upload-Assistant/commit/abcdef1234567890",
+                "commit_url": "https://github.com/bioidaika/Upload-Assistant/commit/abcdef1234567890",
                 "author": "contributor",
                 "committed_at": "2026-08-30T00:00:00Z",
             }
@@ -221,7 +221,7 @@ def test_changelog_history_returns_fetched_data_when_cache_write_fails(tmp_path,
             "version": "v2.0",
             "title": "Version 2.0",
             "changelog": "* fix(webui): keep fetched changelog available",
-            "release_url": "https://github.com/wastaken7/Upload-Assistant/releases/tag/v2.0",
+            "release_url": "https://github.com/bioidaika/Upload-Assistant/releases/tag/v2.0",
             "published_at": "2026-08-29T00:00:00Z",
             "prerelease": False,
         }

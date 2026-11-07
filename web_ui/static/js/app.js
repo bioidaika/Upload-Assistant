@@ -1738,7 +1738,7 @@ function UploadHelpResourcesModal({
 
         <div className="ua-upload-modal-footer flex justify-end border-t px-4 py-3 sm:px-5">
           <a
-            href="https://github.com/wastaken7/Upload-Assistant/tree/development/docs"
+            href="https://github.com/bioidaika/Upload-Assistant/tree/development/docs"
             target="_blank"
             rel="noopener noreferrer"
             className="ua-upload-modal-action rounded-lg px-4 py-2 text-sm font-semibold"

@@ -314,7 +314,7 @@ def _print_config_error(error_type: str, message: str, lineno: int | None = None
         logger.info(f"{_RED}  {message}{_RESET}", extra={"markup": False})
     if suggestion:
         logger.info(f"{_GREEN}  Suggestion: {suggestion}{_RESET}", extra={"markup": False})
-    logger.info(f"\n{_RED}Reference: https://github.com/wastaken7/Upload-Assistant/blob/master/data/example_config.py{_RESET}", extra={"markup": False})
+    logger.info(f"\n{_RED}Reference: https://github.com/bioidaika/Upload-Assistant/blob/development/data/example_config.py{_RESET}", extra={"markup": False})
 
 
 config: dict[str, Any]
@@ -389,7 +389,7 @@ if Path(_config_path).exists():
 else:
     logger.info(f"{_RED}Configuration file 'config.py' not found.{_RESET}", extra={"markup": False})
     logger.info(f"{_RED}Please ensure the file is located at: {_YELLOW}{_config_path}{_RESET}", extra={"markup": False})
-    logger.info(f"{_RED}Follow the setup instructions: https://github.com/wastaken7/Upload-Assistant{_RESET}", extra={"markup": False})
+    logger.info(f"{_RED}Follow the setup instructions: https://github.com/bioidaika/Upload-Assistant{_RESET}", extra={"markup": False})
     sys.exit(1)
 
 
@@ -1877,7 +1877,7 @@ async def process_meta(meta: Meta, base_dir: str) -> bool:
                         gc.collect()
                         cleanup_manager.reset_terminal()
                         if "workers" in str(e):
-                            logger.info("[red]max workers issue, see https://github.com/wastaken7/Upload-Assistant/blob/development/docs/ffmpeg-max-workers-issues.md[/red]")
+                            logger.info("[red]max workers issue, see https://github.com/bioidaika/Upload-Assistant/blob/development/docs/ffmpeg-max-workers-issues.md[/red]")
                         raise Exception(f"Error during screenshot capture: {e}") from e
 
             except asyncio.CancelledError as e:
@@ -2459,7 +2459,7 @@ def extract_changelog(content: str, to_version: str) -> str | None:
 
 async def update_notification() -> str:
     version_file = CODE_DIR / "src" / "version.py"
-    remote_version_url = "https://raw.githubusercontent.com/wastaken7/Upload-Assistant/master/src/version.py"
+    remote_version_url = "https://raw.githubusercontent.com/bioidaika/Upload-Assistant/development/src/version.py"
 
     notice = config["DEFAULT"].get("update_notification", True)
     verbose = config["DEFAULT"].get("verbose_notification", False)
@@ -2769,7 +2769,7 @@ async def do_the_thing(base_dir: str) -> None:
             for error in config_errors:
                 logger.info(f"[red]  ✗ {error}[/red]")
             logger.info("[red]\nPlease fix the above errors in your config.py[/red]")
-            logger.info("[yellow]Reference: https://github.com/wastaken7/Upload-Assistant/blob/development/data/example_config.py[/yellow]")
+            logger.info("[yellow]Reference: https://github.com/bioidaika/Upload-Assistant/blob/development/data/example_config.py[/yellow]")
             raise SystemExit(1)
 
         if config_warnings:

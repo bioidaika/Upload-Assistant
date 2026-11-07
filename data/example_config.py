@@ -358,7 +358,7 @@ config: dict[str, Any] = {
         "xxx_single_file_screens": "0",
         # --- GENERAL DESCRIPTION SETTINGS ---
         # See detailed documentation on how these settings affect description building:
-        # https://github.com/wastaken7/Upload-Assistant/blob/development/docs/description-builder.md
+        # https://github.com/bioidaika/Upload-Assistant/blob/development/docs/description-builder.md
         # Add a TMDB show or movie logo to the top of the description.
         "add_logo": True,
         # Logo width in pixels.
@@ -560,7 +560,7 @@ config: dict[str, Any] = {
     "TRACKERS": {
         # Which trackers do you want to upload to?
         # Note: Description layout settings (like screenshot grids, logos, etc.) can be overridden per-tracker.
-        # See: https://github.com/wastaken7/Upload-Assistant/blob/development/docs/description-builder.md
+        # See: https://github.com/bioidaika/Upload-Assistant/blob/development/docs/description-builder.md
         # Available trackers:
         #   1PTBA, AITHER, ALPHARATIO, AMIGOSSHARE, ANTHELION, ASIANCINEMA, AVISTAZ, BEYONDHD, BITHDTV, BITPORN, BJSHARE, BLUTOPIA,
         #   BRASILTRACKER, BROADCASTHENET, CAPYBARABR, CATHODERAYTUBE, CINEMATIK, CINEMAZ, CURUPIRA, CZTEAM, DARKPEERS, DESITORRENTS,
@@ -580,7 +580,7 @@ config: dict[str, Any] = {
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # Cookies required (export from https://1ptba.com/ to data/cookies/1PTBA.txt).
-            # See: https://github.com/wastaken7/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
+            # See: https://github.com/bioidaika/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
             "announce_url": "",
             "anon": True,
             # The configurations below override the DEFAULT configuration
@@ -675,7 +675,7 @@ config: dict[str, Any] = {
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # Cookies required (export from https://amigos-share.club to data/cookies/AMIGOSSHARE.txt).
-            # See: https://github.com/wastaken7/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
+            # See: https://github.com/bioidaika/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
             # The torrent is downloaded from the site after the upload; the announce URL (with your passkey) is
             # used for the private torrent that is sent, and is seeded if that download fails.
             "announce_url": "",
@@ -762,7 +762,7 @@ config: dict[str, Any] = {
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # Cookies required (export from https://avistaz.to to data/cookies/AVISTAZ.txt).
-            # See: https://github.com/wastaken7/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
+            # See: https://github.com/bioidaika/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
             "announce_url": "",
             "anon": True,
             # If True, the script performs a basic rules compliance check (e.g., codecs, region).
@@ -873,7 +873,7 @@ config: dict[str, Any] = {
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # Cookies required (export from https://bj-share.info to data/cookies/BJSHARE.txt).
-            # See: https://github.com/wastaken7/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
+            # See: https://github.com/bioidaika/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
             # Two-factor authentication (2FA) must be enabled in your profile settings; otherwise, your session cookies will expire fairly quickly.
             "announce_url": "",
             # "use_for_search": False, set to True to import IDs and descriptions from BJ-Share torrents found in your client's torrent comments
@@ -952,7 +952,7 @@ config: dict[str, Any] = {
             "cli_alias": "BT",
             "link_dir_name": "",
             # Cookies required (export from https://brasiltracker.org/ to data/cookies/BRASILTRACKER.txt).
-            # See: https://github.com/wastaken7/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
+            # See: https://github.com/bioidaika/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
             "announce_url": "",
             "anon": True,
             # Set this to True if you want to allow external subtitles to be included in the upload
@@ -1038,7 +1038,7 @@ config: dict[str, Any] = {
         "CATHODERAYTUBE": {
             "cli_alias": "CRT",
             # Cookies required (export from https://www.cathode-ray.tube/ to data/cookies/CATHODERAYTUBE.txt).
-            # See: https://github.com/wastaken7/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
+            # See: https://github.com/bioidaika/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
             "announce_url": "",
             "anon": True,
         },
@@ -1088,7 +1088,7 @@ config: dict[str, Any] = {
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # Cookies required (export from https://cinemaz.to to data/cookies/CINEMAZ.txt).
-            # See: https://github.com/wastaken7/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
+            # See: https://github.com/bioidaika/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
             "announce_url": "",
             "anon": True,
             # If True, the script performs a basic rules compliance check (e.g., codecs, region).
@@ -1358,7 +1358,7 @@ config: dict[str, Any] = {
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # Cookies required (export from https://exoticaz.to to data/cookies/EXOTICAZ.txt).
-            # See: https://github.com/wastaken7/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
+            # See: https://github.com/bioidaika/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
             # Uploads are published with the torrent file downloaded from the site, which carries your passkey.
             "anon": True,
             # If True, the script performs a basic rules compliance check (e.g., file types, size, video sheets).
@@ -1442,7 +1442,7 @@ config: dict[str, Any] = {
             # You can find your API key in Profile Settings -> Access Settings -> API Key. If there is no API, click "Reset your api key" and Save Profile.
             "api_key": "",
             # Optionally, export cookies from https://greatposterwall.com to data/cookies/GREATPOSTERWALL.txt to improve duplicate searches.
-            # See: https://github.com/wastaken7/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
+            # See: https://github.com/bioidaika/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
             # You can find your announce URL at https://greatposterwall.com/upload.php
             "announce_url": "",
             # Upload with Exclusive flag
@@ -1519,7 +1519,7 @@ config: dict[str, Any] = {
             "use_for_search": False,
             # for HDBITS you **MUST** have been granted uploading approval via Offers, you've been warned
             # Cookies required (export from https://hdbits.org/ to data/cookies/HDBITS.txt).
-            # See: https://github.com/wastaken7/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
+            # See: https://github.com/bioidaika/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
             "username": "",
             "passkey": "",
             "announce_url": "",
@@ -1531,7 +1531,7 @@ config: dict[str, Any] = {
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # Cookies required (export from https://hd-space.org/ to data/cookies/HDSPACE.txt).
-            # See: https://github.com/wastaken7/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
+            # See: https://github.com/bioidaika/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
             "announce_url": "",
             "anon": True,
             # Set to True if you want to include the full MediaInfo in your upload description or False to include only the most relevant parts.
@@ -1563,7 +1563,7 @@ config: dict[str, Any] = {
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # Cookies required (export to data/cookies/HDTORRENTS.txt).
-            # See: https://github.com/wastaken7/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
+            # See: https://github.com/bioidaika/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
             # You can change the URL if the main site is down or if you encounter upload issues.
             # Keep in mind that changing the URL requires exporting the cookies again from the new domain.
             # Alternative domains:
@@ -1640,7 +1640,7 @@ config: dict[str, Any] = {
         "IMMORTALSEED": {
             "cli_alias": "IS",
             # Cookies required (export from https://immortalseed.me/ to data/cookies/IMMORTALSEED.txt).
-            # See: https://github.com/wastaken7/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
+            # See: https://github.com/bioidaika/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             "announce_url": "",
@@ -1716,7 +1716,7 @@ config: dict[str, Any] = {
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # Cookies required (export to data/cookies/IPTORRENTS.txt).
-            # See: https://github.com/wastaken7/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
+            # See: https://github.com/bioidaika/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
             "announce_url": "",
             # By default, IPTORRENTS removes all dots from the upload name, causing audio codecs to be named incorrectly, for example, "DTS 5 1" instead of "DTS 5.1".
             # It also does not have the option to set the IMDb during upload.
@@ -1794,7 +1794,7 @@ config: dict[str, Any] = {
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # Cookies required (export from https://pt.lajidui.top/ to data/cookies/LAJIDUI.txt).
-            # See: https://github.com/wastaken7/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
+            # See: https://github.com/bioidaika/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
             "announce_url": "",
             "anon": True,
             # The configurations below override the DEFAULT configuration
@@ -1909,7 +1909,7 @@ config: dict[str, Any] = {
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # Cookies required (export from https://lemonhd.net/ to data/cookies/LEMONHD.txt).
-            # See: https://github.com/wastaken7/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
+            # See: https://github.com/bioidaika/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
             "announce_url": "",
             # The configurations below override the DEFAULT configuration
             "add_logo": True,
@@ -1984,7 +1984,7 @@ config: dict[str, Any] = {
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # Cookies required (export from https://longpt.org/ to data/cookies/LONGPT.txt).
-            # See: https://github.com/wastaken7/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
+            # See: https://github.com/bioidaika/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
             "announce_url": "",
             "anon": True,
             # The configurations below override the DEFAULT configuration
@@ -2101,7 +2101,7 @@ config: dict[str, Any] = {
         "MAKINGOFF": {
             "cli_alias": "MKO",
             # Cookies required (export from https://www.makingoff.org/ to data/cookies/MAKINGOFF.txt).
-            # See: https://github.com/wastaken7/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
+            # See: https://github.com/bioidaika/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # trackers to be added on the torrents
@@ -2494,7 +2494,7 @@ config: dict[str, Any] = {
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # Cookies required (export from https://privatehd.to/ to data/cookies/PRIVATEHD.txt).
-            # See: https://github.com/wastaken7/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
+            # See: https://github.com/bioidaika/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
             "announce_url": "",
             "anon": True,
             # If True, the script performs a basic rules compliance check (e.g., codecs, region).
@@ -2519,7 +2519,7 @@ config: dict[str, Any] = {
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # Cookies required (export from https://ptcafe.club/ to data/cookies/PTCAFE.txt).
-            # See: https://github.com/wastaken7/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
+            # See: https://github.com/bioidaika/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
             "announce_url": "",
             "anon": True,
             # The configurations below override the DEFAULT configuration
@@ -2563,7 +2563,7 @@ config: dict[str, Any] = {
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # Cookies required (export from https://ptfans.cc/ to data/cookies/PTFANS.txt).
-            # See: https://github.com/wastaken7/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
+            # See: https://github.com/bioidaika/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
             "announce_url": "",
             "anon": True,
             # The configurations below override the DEFAULT configuration
@@ -2594,7 +2594,7 @@ config: dict[str, Any] = {
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # Cookies required (export from https://pt.gtkpw.xyz to data/cookies/PTGTK.txt).
-            # See: https://github.com/wastaken7/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
+            # See: https://github.com/bioidaika/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
             "announce_url": "",
             "anon": True,
             # The configurations below override the DEFAULT configuration
@@ -2625,7 +2625,7 @@ config: dict[str, Any] = {
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # Cookies required (export from https://www.ptskit.org to data/cookies/PTSKIT.txt).
-            # See: https://github.com/wastaken7/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
+            # See: https://github.com/bioidaika/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
             "announce_url": "",
             # The configurations below override the DEFAULT configuration
             "add_logo": True,
@@ -2655,7 +2655,7 @@ config: dict[str, Any] = {
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # Cookies required (export from https://ptzone.xyz/ to data/cookies/PTZONE.txt).
-            # See: https://github.com/wastaken7/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
+            # See: https://github.com/bioidaika/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
             "announce_url": "",
             "anon": True,
             # The configurations below override the DEFAULT configuration
@@ -2688,7 +2688,7 @@ config: dict[str, Any] = {
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # Cookies required (export from https://www.qingwapt.com/ to data/cookies/QINGWA.txt).
-            # See: https://github.com/wastaken7/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
+            # See: https://github.com/bioidaika/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
             "announce_url": "",
             "anon": True,
             # The configurations below override the DEFAULT configuration
@@ -2763,7 +2763,7 @@ config: dict[str, Any] = {
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # Cookies required (export from https://bilibili.download to data/cookies/RAILGUNPT.txt).
-            # See: https://github.com/wastaken7/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
+            # See: https://github.com/bioidaika/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
             "announce_url": "",
             "anon": True,
             # The configurations below override the DEFAULT configuration
@@ -3390,7 +3390,7 @@ config: dict[str, Any] = {
             "link_dir_name": "",
             # Set to False if you don't have access to the API (e.g., if you're a trial uploader). Note: this may not work sometimes due to Cloudflare restrictions.
             # If you are not going to use the API, you will need to export cookies from https://www.torrentleech.org/ to data/cookies/TORRENTLEECH.txt.
-            # See: https://github.com/wastaken7/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
+            # See: https://github.com/bioidaika/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
             "api_upload": True,
             # You can find your passkey at your profile (https://www.torrentleech.org/profile/[YourUserName]/view) -> Torrent Passkey
             "passkey": "",
@@ -3578,7 +3578,7 @@ config: dict[str, Any] = {
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # Cookies required (export from https://pt.xingyungept.org/ to data/cookies/XINGYUNGEPT.txt).
-            # See: https://github.com/wastaken7/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
+            # See: https://github.com/bioidaika/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
             "announce_url": "",
             "anon": True,
             # The configurations below override the DEFAULT configuration
@@ -3693,7 +3693,7 @@ config: dict[str, Any] = {
         "ZMPT": {
             "cli_alias": "ZMPT",
             # Cookies required (export from https://zmpt.cc/ to data/cookies/ZMPT.txt).
-            # See: https://github.com/wastaken7/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
+            # See: https://github.com/bioidaika/Upload-Assistant/blob/development/docs/example-config.md#how-to-export-cookies
             "announce_url": "",
             "anon": True,
         },
@@ -3709,7 +3709,7 @@ config: dict[str, Any] = {
         # Name your torrent clients here, for example, this example is named "qbittorrent" and is set as default_torrent_client above
         # All options relate to the webui, make sure you have the webui secured if it has WAN access
         # **DO NOT** modify torrent_client name, eg: "qbit"
-        # See https://github.com/wastaken7/Upload-Assistant/blob/development/docs/configuration.md#torrent-clients
+        # See https://github.com/bioidaika/Upload-Assistant/blob/development/docs/configuration.md#torrent-clients
         "qbittorrent": {
             "torrent_client": "qbit",
             # qui reverse proxy: https://getqui.com/docs/features/reverse-proxy

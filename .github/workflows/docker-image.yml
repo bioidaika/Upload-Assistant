@@ -10,7 +10,7 @@ on:
         description: "Tag as latest instead of branch name"
         required: false
         type: boolean
-        default: false
+        default: true
 
 env:
   REGISTRY: ghcr.io

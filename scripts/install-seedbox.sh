@@ -111,7 +111,7 @@ clone_or_update_repo() {
 
     if [ ! -d "${UA_DIR}/.git" ]; then
         log "Cloning Upload Assistant into ${UA_DIR}"
-        git clone https://github.com/wastaken7/Upload-Assistant.git "$UA_DIR"
+        git clone https://github.com/bioidaika/Upload-Assistant.git "$UA_DIR"
         return
     fi
 

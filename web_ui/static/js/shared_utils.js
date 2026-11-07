@@ -127,12 +127,12 @@
         {
           label: "Documentation home",
           description: "Overview and links to the main guides.",
-          href: "https://github.com/wastaken7/Upload-Assistant/blob/development/docs/home.md",
+          href: "https://github.com/bioidaika/Upload-Assistant/blob/development/docs/home.md",
         },
         {
           label: "WebUI guide",
           description: "Complete WebUI setup, usage and administration.",
-          href: "https://github.com/wastaken7/Upload-Assistant/blob/development/docs/web-ui.md",
+          href: "https://github.com/bioidaika/Upload-Assistant/blob/development/docs/web-ui.md",
         },
       ],
     },
@@ -142,17 +142,17 @@
         {
           label: "Configuration reference",
           description: "Detailed settings, defaults and implementation notes.",
-          href: "https://github.com/wastaken7/Upload-Assistant/blob/development/docs/example-config.md",
+          href: "https://github.com/bioidaika/Upload-Assistant/blob/development/docs/example-config.md",
         },
         {
           label: "CLI arguments",
           description: "Command-line options that can override configuration.",
-          href: "https://github.com/wastaken7/Upload-Assistant/blob/development/docs/cli-args.md",
+          href: "https://github.com/bioidaika/Upload-Assistant/blob/development/docs/cli-args.md",
         },
         {
           label: "Description builder",
           description: "How description formatting and layout options work.",
-          href: "https://github.com/wastaken7/Upload-Assistant/blob/development/docs/description-builder.md",
+          href: "https://github.com/bioidaika/Upload-Assistant/blob/development/docs/description-builder.md",
         },
       ],
     },
@@ -162,22 +162,22 @@
         {
           label: "Windows installation",
           description: "Install and run Upload Assistant on Windows.",
-          href: "https://github.com/wastaken7/Upload-Assistant/blob/development/docs/windows-install.md",
+          href: "https://github.com/bioidaika/Upload-Assistant/blob/development/docs/windows-install.md",
         },
         {
           label: "Docker",
           description: "Container setup and configuration.",
-          href: "https://github.com/wastaken7/Upload-Assistant/blob/development/docs/docker.md",
+          href: "https://github.com/bioidaika/Upload-Assistant/blob/development/docs/docker.md",
         },
         {
           label: "Unraid",
           description: "Deployment guidance for Unraid.",
-          href: "https://github.com/wastaken7/Upload-Assistant/blob/development/docs/unraid.md",
+          href: "https://github.com/bioidaika/Upload-Assistant/blob/development/docs/unraid.md",
         },
         {
           label: "Seedbox setup",
           description: "Paths and setup considerations for seedboxes.",
-          href: "https://github.com/wastaken7/Upload-Assistant/blob/development/docs/seedbox.md",
+          href: "https://github.com/bioidaika/Upload-Assistant/blob/development/docs/seedbox.md",
         },
       ],
     },
@@ -187,22 +187,22 @@
         {
           label: "Usenet",
           description: "Configure and use Usenet uploading.",
-          href: "https://github.com/wastaken7/Upload-Assistant/blob/development/docs/usenet.md",
+          href: "https://github.com/bioidaika/Upload-Assistant/blob/development/docs/usenet.md",
         },
         {
           label: "Book uploads",
           description: "Book-specific preparation and uploading.",
-          href: "https://github.com/wastaken7/Upload-Assistant/blob/development/docs/book-upload.md",
+          href: "https://github.com/bioidaika/Upload-Assistant/blob/development/docs/book-upload.md",
         },
         {
           label: "Music uploads",
           description: "Music-specific preparation and uploading.",
-          href: "https://github.com/wastaken7/Upload-Assistant/blob/development/docs/music-upload.md",
+          href: "https://github.com/bioidaika/Upload-Assistant/blob/development/docs/music-upload.md",
         },
         {
           label: "Game uploads",
           description: "Game-specific preparation and uploading.",
-          href: "https://github.com/wastaken7/Upload-Assistant/blob/development/docs/game-upload.md",
+          href: "https://github.com/bioidaika/Upload-Assistant/blob/development/docs/game-upload.md",
         },
       ],
     },
@@ -716,7 +716,7 @@
       const scope = conventional?.[2]?.trim() || "";
       let summary = conventional?.[3]?.trim() || content;
       const urlMatch = summary.match(
-        /https:\/\/github\.com\/wastaken7\/Upload-Assistant\/(?:pull|issues)\/\d+/i,
+        /https:\/\/github\.com\/(?:bioidaika|wastaken7)\/Upload-Assistant\/(?:pull|issues)\/\d+/i,
       );
       const url = urlMatch?.[0] || "";
       if (url) {
@@ -1205,7 +1205,7 @@
             {
               href:
                 status.release_url ||
-                "https://github.com/wastaken7/Upload-Assistant/releases",
+                "https://github.com/bioidaika/Upload-Assistant/releases",
               target: "_blank",
               rel: "noopener noreferrer",
               className:
@@ -1962,7 +1962,7 @@
           h(
             "a",
             {
-              href: "https://github.com/wastaken7/Upload-Assistant/releases",
+              href: "https://github.com/bioidaika/Upload-Assistant/releases",
               target: "_blank",
               rel: "noopener noreferrer",
               className:

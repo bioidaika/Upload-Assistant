@@ -3,7 +3,7 @@
   <h1>Upload-Assistant</h1>
   <p>Prepare media and upload it to supported private trackers and Usenet indexers.</p>
 
-[![Python Version](https://img.shields.io/badge/Python-3.14%2B-blue?logo=python&logoColor=white)](https://www.python.org/) [![License](https://img.shields.io/badge/License-UAPL%20v1.0-orange)](LICENSE) [![Ruff](https://img.shields.io/badge/Ruff-000000?logo=ruff&logoColor=white)](https://github.com/astral-sh/ruff) [![Pyright](https://img.shields.io/badge/Pyright-strict-brightgreen)](https://github.com/microsoft/pyright) [![code style: prettier](https://img.shields.io/badge/code%20style-prettier-ff69b4.svg)](https://prettier.io) [![Docker Image CI](https://github.com/wastaken7/Upload-Assistant/actions/workflows/docker-image.yml/badge.svg)](https://github.com/wastaken7/Upload-Assistant/actions/workflows/docker-image.yml)
+[![Python Version](https://img.shields.io/badge/Python-3.14%2B-blue?logo=python&logoColor=white)](https://www.python.org/) [![License](https://img.shields.io/badge/License-UAPL%20v1.0-orange)](LICENSE) [![Ruff](https://img.shields.io/badge/Ruff-000000?logo=ruff&logoColor=white)](https://github.com/astral-sh/ruff) [![Pyright](https://img.shields.io/badge/Pyright-strict-brightgreen)](https://github.com/microsoft/pyright) [![code style: prettier](https://img.shields.io/badge/code%20style-prettier-ff69b4.svg)](https://prettier.io) [![Docker Image CI](https://github.com/bioidaika/Upload-Assistant/actions/workflows/docker-image.yml/badge.svg)](https://github.com/bioidaika/Upload-Assistant/actions/workflows/docker-image.yml)
 </div>
 
 Upload Assistant collects metadata, generates screenshots and artwork, creates torrent or NZB files, and publishes releases to the destinations you choose. Use it through a browser interface (WebUI) or the command line (CLI).
@@ -112,7 +112,7 @@ Close Terminal and open a new window after installation.
 In your new terminal window, run:
 
 ```text
-uv tool install upload-assistant
+uv tool install git+https://github.com/bioidaika/Upload-Assistant.git
 ```
 
 `uv` creates an isolated environment and installs a compatible Python version (3.14 or newer) if needed. The installed app is called `ua`, and you can run it from any directory.
@@ -213,10 +213,10 @@ Still stuck? See [Help](#help) and include the relevant error message.
 
 ## Updating
 
-For the published release installed above, stop the app and run:
+To update to the latest version from this repository, stop the app and run:
 
 ```text
-uv tool upgrade upload-assistant
+uv tool install --force git+https://github.com/bioidaika/Upload-Assistant.git
 ```
 
 Then start it again with your usual command.
@@ -282,16 +282,16 @@ Follow the [Seedbox / Linux installation guide](docs/seedbox.md).
 
 ### Development version from GitHub
 
-For the latest repository version instead of the published package:
+For the latest repository version from GitHub:
 
 ```text
-uv tool install git+https://github.com/wastaken7/Upload-Assistant.git
+uv tool install git+https://github.com/bioidaika/Upload-Assistant.git
 ```
 
 This installation requires Git. If `uv` reports an existing installation, use `--force` to replace it. To update an installation from GitHub, stop the app and run:
 
 ```text
-uv tool install --force git+https://github.com/wastaken7/Upload-Assistant.git
+uv tool install --force git+https://github.com/bioidaika/Upload-Assistant.git
 ```
 
 ## Guides and advanced workflows
@@ -403,7 +403,7 @@ uv tool install --force git+https://github.com/wastaken7/Upload-Assistant.git
 | <img src="web_ui/static/img/trackers/tvchaosuk.png" alt="" width="16" height="16" />          | TV Chaos UK            | TVCHAOSUK              | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/xingyungept.png" width="16" height="16" />               | XingyungePT            | XINGYUNGEPT            | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/ulcx.png" width="16" height="16" />                      | ULCX                   | ULCX                   | MOVIE, TV                    |
-|                                                                                               | VietMediaF             | VIETMEDIAF             | MOVIE, TV                    |
+| <img src="web_ui/static/img/trackers/vietmediaf.png" width="16" height="16" />                | VietMediaF             | VIETMEDIAF             | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/vultu.png" width="16" height="16" />                     | vultu                  | VULTU                  | MOVIE, TV, GAME              |
 | <img src="web_ui/static/img/trackers/yuscene.png" width="16" height="16" />                   | YUSCENE                | YUSCENE                | MOVIE, TV, BOOK, GAME, MUSIC |
 | <img src="web_ui/static/img/trackers/zenith.png" width="16" height="16" />                    | Zenith                 | ZENITH                 | MOVIE, TV, BOOK, GAME, MUSIC |
@@ -425,7 +425,15 @@ uv tool install --force git+https://github.com/wastaken7/Upload-Assistant.git
 
 ## Fork Features & Differences from Upstream (Audionut/Upload-Assistant)
 
-This branch introduces new media categories and automation features not present in the upstream Audionut repository:
+This fork (`bioidaika/Upload-Assistant`) introduces VietMediaF (`VIETMEDIAF` / `VMF`) integration, unattended auto-trumping (`-uaa`), and additional media categories and automation features not present in the upstream Audionut repository:
+
+### 0. VietMediaF (`VIETMEDIAF` / `VMF`) & Automation Enhancements
+
+- **VietMediaF Tracker Support (`VIETMEDIAF` / `VMF`)**:
+  - **3-Slot Coexistence Rules**: Evaluates `Original`, `ViE` (Thuyết minh / Voice-over), and `ViE DUB` (Lồng tiếng / Dubbed) slots independently using audio/subtitle metadata and release name tags.
+  - **Automated Vietnamese Trumping & Reporting**: Detects trumpable releases in the same slot (missing Vietnamese subtitles, fewer Vietnamese audio tracks, bad release groups) with MediaInfo safety verification, and submits structured trumping reports via the UNIT3D API.
+  - **Unattended Auto Mode (`-uaa` / `--unattended_auto`)**: Automatically executes safe trumping, self-reports scene srrDB mismatches as trumpable, and handles incomplete season packs without manual intervention.
+  - **Resilient Search & Cross-Seed Precision**: Infinite retry support for rate-limited searches, retry logic for per-torrent MediaInfo fetches, and exact conflict matching for season-pack and episode cross-seeding.
 
 ### 1. New Media Category Support
 
@@ -490,7 +498,7 @@ Sequence Usenet and torrent tracker uploads while limiting contention with qBitt
 
 ## Help
 
-For bugs or setup questions, [open a GitHub issue](https://github.com/wastaken7/Upload-Assistant/issues). Include your operating system, installation method (published package, GitHub, or Docker), command or WebUI steps, and the relevant error output. Remove API keys, passwords, personal announce URLs, and other private details before sharing logs or screenshots.
+For bugs or setup questions, [open a GitHub issue](https://github.com/bioidaika/Upload-Assistant/issues). Include your operating system, installation method (published package, GitHub, or Docker), command or WebUI steps, and the relevant error output. Remove API keys, passwords, personal announce URLs, and other private details before sharing logs or screenshots.
 
 If you prefer not to create a GitHub account, use the [Signal group](https://signal.group/#CjQKILmkUCLe5mZULkQGI6B5knmX1ytrIBFicpJ_NZGAHmOrEhDD5F7ctp-obLeLOsa0yCoJ).
 
@@ -518,4 +526,4 @@ Features automated binary managers for:
 
 ## Contributors
 
-[![Contributors](https://contrib.rocks/image?repo=wastaken7/Upload-Assistant)](https://github.com/wastaken7/Upload-Assistant/graphs/contributors)
+[![Contributors](https://contrib.rocks/image?repo=bioidaika/Upload-Assistant)](https://github.com/bioidaika/Upload-Assistant/graphs/contributors)

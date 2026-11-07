@@ -222,6 +222,7 @@ jobs:
           gh workflow run docker-image.yml --ref "$NEW_VERSION" -f use_latest_tag=true
 
   publish-pypi:
+    if: vars.ENABLE_PYPI_PUBLISH == 'true'
     needs: [prepare-release, publish-release]
     runs-on: ubuntu-24.04
     environment:

@@ -15,11 +15,11 @@ from typing import Any
 
 from src.app_paths import CODE_DIR, STATE_DIR
 
-REMOTE_VERSION_URL = "https://raw.githubusercontent.com/wastaken7/Upload-Assistant/master/src/version.py"
-RELEASES_URL = "https://github.com/wastaken7/Upload-Assistant/releases"
-RELEASES_API_URL = "https://api.github.com/repos/wastaken7/Upload-Assistant/releases?per_page=100"
-REPOSITORY_URL = "https://github.com/wastaken7/Upload-Assistant"
-COMPARE_API_URL = "https://api.github.com/repos/wastaken7/Upload-Assistant/compare"
+REMOTE_VERSION_URL = "https://raw.githubusercontent.com/bioidaika/Upload-Assistant/development/src/version.py"
+RELEASES_URL = "https://github.com/bioidaika/Upload-Assistant/releases"
+RELEASES_API_URL = "https://api.github.com/repos/bioidaika/Upload-Assistant/releases?per_page=100"
+REPOSITORY_URL = "https://github.com/bioidaika/Upload-Assistant"
+COMPARE_API_URL = "https://api.github.com/repos/bioidaika/Upload-Assistant/compare"
 DEVELOPMENT_BRANCH = "development"
 MAX_CHANGELOG_RELEASES = 100
 MAX_UNRELEASED_COMMITS = 100

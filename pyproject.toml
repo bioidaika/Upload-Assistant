@@ -71,10 +71,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/wastaken7/Upload-Assistant"
-Documentation = "https://github.com/wastaken7/Upload-Assistant/tree/master/docs"
-Issues = "https://github.com/wastaken7/Upload-Assistant/issues"
-Source = "https://github.com/wastaken7/Upload-Assistant"
+Homepage = "https://github.com/bioidaika/Upload-Assistant"
+Documentation = "https://github.com/bioidaika/Upload-Assistant/tree/development/docs"
+Issues = "https://github.com/bioidaika/Upload-Assistant/issues"
+Source = "https://github.com/bioidaika/Upload-Assistant"
 
 [build-system]
 requires = ["setuptools>=83"]

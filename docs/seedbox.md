@@ -18,7 +18,7 @@ The bundled installer script:
 From a Linux shell:
 
 ```bash
-git clone https://github.com/wastaken7/Upload-Assistant.git
+git clone https://github.com/bioidaika/Upload-Assistant.git
 cd Upload-Assistant
 chmod +x scripts/install-seedbox.sh
 ./scripts/install-seedbox.sh --ua-dir "$PWD"

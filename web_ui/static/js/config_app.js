@@ -5080,7 +5080,7 @@ function HelpResourcesModal({
 
         <div className="flex justify-end border-t px-4 py-3 sm:px-5">
           <a
-            href="https://github.com/wastaken7/Upload-Assistant/tree/development/docs"
+            href="https://github.com/bioidaika/Upload-Assistant/tree/development/docs"
             target="_blank"
             rel="noopener noreferrer"
             className="ua-config-service-action inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-semibold"
@@ -7898,7 +7898,7 @@ function ItemList({
           <p className="ua-config-service-description text-xs leading-relaxed">
             For upload workflows and qBittorrent requirements, see the{" "}
             <a
-              href="https://github.com/wastaken7/Upload-Assistant/blob/development/docs/upload-order-and-bandwidth-control.md"
+              href="https://github.com/bioidaika/Upload-Assistant/blob/development/docs/upload-order-and-bandwidth-control.md"
               target="_blank"
               rel="noopener noreferrer"
               className="ua-config-service-action inline-flex items-center gap-1 font-semibold hover:underline"
@@ -8274,7 +8274,7 @@ function ItemList({
                   <p className="ua-config-service-description mt-1 text-xs leading-relaxed">
                     Learn how these settings affect your descriptions in the{" "}
                     <a
-                      href="https://github.com/wastaken7/Upload-Assistant/blob/development/docs/description-builder.md"
+                      href="https://github.com/bioidaika/Upload-Assistant/blob/development/docs/description-builder.md"
                       target="_blank"
                       rel="noopener noreferrer"
                       className="ua-config-service-action inline-flex items-center gap-1 font-semibold hover:underline"
