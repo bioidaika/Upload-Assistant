@@ -29,7 +29,8 @@ LEGACY_API_KEY_EXPIRY_FILENAME = "api_key_expiry.sqlite3"
 # Threads of one process opening a new database wait for each other here;
 # other processes are serialized by the write lock taken in _migrate.
 _migration_lock = threading.Lock()
-_WAL_ATTEMPTS = 50
+# Total time spent retrying the WAL switch; each attempt can also wait busy_timeout.
+_WAL_RETRY_SECONDS = 5.0
 
 
 class NewerSchemaError(sqlite3.DatabaseError):
@@ -201,8 +202,23 @@ def _migrate_2(db: sqlite3.Connection, _data_dir: Path) -> None:
     db.execute("CREATE INDEX history_requests_item ON history_requests (item_id)")
 
 
+def _migrate_3(db: sqlite3.Connection, _data_dir: Path) -> None:
+    """What earlier runs learned about a release (confirmed IDs and manual answers), by content fingerprint."""
+    db.execute(
+        """
+        CREATE TABLE release_memory (
+            fingerprint TEXT PRIMARY KEY,
+            updated_at TEXT NOT NULL,
+            category TEXT NOT NULL DEFAULT '',
+            ids TEXT NOT NULL DEFAULT '',
+            answers TEXT NOT NULL DEFAULT ''
+        )
+        """
+    )
+
+
 # Append only: a migration that has shipped must never change.
-MIGRATIONS: tuple[Callable[[sqlite3.Connection, Path], None], ...] = (_migrate_1, _migrate_2)
+MIGRATIONS: tuple[Callable[[sqlite3.Connection, Path], None], ...] = (_migrate_1, _migrate_2, _migrate_3)
 SCHEMA_VERSION = len(MIGRATIONS)
 
 
@@ -212,12 +228,13 @@ def _schema_version(db: sqlite3.Connection) -> int:
 
 def _enable_wal(db: sqlite3.Connection) -> None:
     """Switch to WAL; another connection reading the new file can briefly hold the lock this needs."""
-    for attempt in range(_WAL_ATTEMPTS):
+    deadline = time.monotonic() + _WAL_RETRY_SECONDS
+    while True:
         try:
             db.execute("PRAGMA journal_mode = WAL")
             return
         except sqlite3.OperationalError as exc:
-            if attempt == _WAL_ATTEMPTS - 1 or not any(reason in str(exc).lower() for reason in ("busy", "locked")):
+            if time.monotonic() >= deadline or not any(reason in str(exc).lower() for reason in ("busy", "locked")):
                 raise
             time.sleep(0.1)
 
