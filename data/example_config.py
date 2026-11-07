@@ -123,6 +123,12 @@ config: dict[str, Any] = {
         # names, paths, external IDs, URLs, or credentials are stored. Opt in by
         # changing this setting to True.
         "stats_enabled": False,
+        # --- UPLOAD HISTORY ---
+        # Keep a local history of processed releases for the History Web UI page:
+        # release names, paths, external IDs, tracker results with links, and
+        # request matches. Debug runs are not recorded. Set to False to stop
+        # recording; entries already stored are kept until you clear them.
+        "history_enabled": True,
         # --- METADATA CACHING ---
         # Public metadata cache
         # Cache responses from sites such as TMDB and IMDb for reuse in future runs, reducing API requests.
@@ -3757,6 +3763,14 @@ config: dict[str, Any] = {
             # Remote path mapping (docker/etc.) CASE SENSITIVE
             "local_path": [""],
             "remote_path": [""],
+            # For a client that seeds its own copy of your files, such as a seedbox.
+            # Before adding, UA looks in this client for a complete torrent holding the same files (names and sizes)
+            # and seeds the new torrent from that torrent's folder, without path mapping or linking.
+            # "prefer": use that copy when found, otherwise use the path mapping above.
+            # "require": add the torrent to this client only when such a copy is found.
+            # Leave empty to always use the path mapping.
+            # Guide: https://github.com/wastaken7/Upload-Assistant/blob/development/docs/seeding-from-a-second-client.md
+            "match_existing_content": "",
             # Set to False to skip verify certificate for HTTPS connections; for instance, if the connection is using a self-signed certificate.
             # "VERIFY_WEBUI_CERTIFICATE": True,
         },
