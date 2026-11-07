@@ -49,9 +49,17 @@ class VietMediaF(UNIT3D):
     _dub_title_tokens = (re.compile(r"\blong\s+tieng\b"), re.compile(r"\b(?:uslt|vnlt)\b"))
     _voice_over_title_tokens = (re.compile(r"\bthuyet\s+minh\b"), re.compile(r"\btm\b"))
     _vietnamese_language_tokens = frozenset({"vi", "vie", "vietnamese"})
+    _tv_release_pattern = re.compile(
+        r"\b[sS]\d{1,2}(?:[eE]\d{1,3})*\b|\b(?:season|series|ep|episode)[.\s_-]*\d+\b|\b[eE]\d{2,3}\b",
+        re.IGNORECASE,
+    )
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config, tracker_name="VIETMEDIAF")
+
+    @classmethod
+    def _is_tv_release_name(cls, name: str) -> bool:
+        return bool(cls._tv_release_pattern.search(name))
 
     @staticmethod
     def _normalized_words(value: str) -> str:
@@ -475,11 +483,11 @@ class VietMediaF(UNIT3D):
                 continue
 
             # Safeguard: Do not cross-trump between TV and Movie releases
-            if meta.category == "MOVIE" and re.search(r"\b[sS]\d{1,2}(?:[eE]\d{1,2})?\b|\b(?:season|series)\s*\d+\b", entry_name, re.IGNORECASE):
+            if meta.category == "MOVIE" and self._is_tv_release_name(entry_name):
                 if entry.get("trumpable", False):
                     entry["trumpable"] = False
                 continue
-            if meta.category == "TV" and not re.search(r"\b[sS]\d{1,2}\b|\b(?:season|series)\s*\d+\b", entry_name, re.IGNORECASE):
+            if meta.category == "TV" and not self._is_tv_release_name(entry_name):
                 if entry.get("trumpable", False):
                     entry["trumpable"] = False
                 continue
@@ -549,17 +557,17 @@ class VietMediaF(UNIT3D):
         dupes = await super().search_existing(meta)
         # Filter out cross-category duplicates (e.g. TV results when searching for Movie)
         if meta.category == "MOVIE":
-            dupes = [d for d in dupes if isinstance(d, dict) and not re.search(r"\b[sS]\d{1,2}(?:[eE]\d{1,2})?\b|\b(?:season|series)\s*\d+\b", str(d.get("name", "")), re.IGNORECASE)]
+            dupes = [d for d in dupes if isinstance(d, dict) and not self._is_tv_release_name(str(d.get("name", "")))]
         elif meta.category == "TV":
-            dupes = [d for d in dupes if isinstance(d, dict) and re.search(r"\b[sS]\d{1,2}\b|\b(?:season|series)\s*\d+\b", str(d.get("name", "")), re.IGNORECASE)]
+            dupes = [d for d in dupes if isinstance(d, dict) and self._is_tv_release_name(str(d.get("name", "")))]
 
         self._apply_vietnamese_trump_rules(meta, dupes)
         title_releases = meta.get(f"{self.tracker}_title_releases")
         if isinstance(title_releases, list):
             if meta.category == "MOVIE":
-                title_releases = [d for d in title_releases if isinstance(d, dict) and not re.search(r"\b[sS]\d{1,2}(?:[eE]\d{1,2})?\b|\b(?:season|series)\s*\d+\b", str(d.get("name", "")), re.IGNORECASE)]
+                title_releases = [d for d in title_releases if isinstance(d, dict) and not self._is_tv_release_name(str(d.get("name", "")))]
             elif meta.category == "TV":
-                title_releases = [d for d in title_releases if isinstance(d, dict) and re.search(r"\b[sS]\d{1,2}\b|\b(?:season|series)\s*\d+\b", str(d.get("name", "")), re.IGNORECASE)]
+                title_releases = [d for d in title_releases if isinstance(d, dict) and self._is_tv_release_name(str(d.get("name", "")))]
             meta[f"{self.tracker}_title_releases"] = title_releases
             self._apply_vietnamese_trump_rules(meta, title_releases)
         return dupes

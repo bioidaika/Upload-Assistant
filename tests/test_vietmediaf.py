@@ -1134,3 +1134,89 @@ async def test_season_pack_exact_match_not_clobbered_by_competing_season_pack():
     )
     is_dupe, updated_meta = await helper.dupe_check(filtered, meta, "VIETMEDIAF", slot_decision)
     assert meta.get("VIETMEDIAF_cross_seed") == "https://tracker.vietmediaf.store/torrents/download/101.torrent"
+
+
+@pytest.mark.asyncio
+async def test_vietmediaf_search_existing_retains_tv_episodes(monkeypatch):
+    from src.slot_rules.registry import evaluate_slots
+    from src.slot_rules.models import Verdict
+
+    vmf = tracker()
+    episode_entry = {
+        "id": 501,
+        "name": "Stick S02E01 2160p ATVP WEB-DL Dual-Audio DD 5.1 DV HDR10+ H.265-BiOMA",
+        "size": "5.2 GB",
+        "res": "2160p",
+        "type": "WEBDL",
+        "download": "https://tracker.vietmediaf.store/torrents/download/501.torrent",
+        "files": ["Stick.S02E01.2160p.ATVP.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265.DUAL-BiOMA.mkv"],
+        "file_count": 1,
+        "trumpable": False,
+    }
+    multi_ep_entry = {
+        "id": 502,
+        "name": "Stick S02E01E02 2160p ATVP WEB-DL DD 5.1 H.265-BiOMA",
+        "size": "10.1 GB",
+        "res": "2160p",
+        "type": "WEBDL",
+        "download": "https://tracker.vietmediaf.store/torrents/download/502.torrent",
+        "files": [],
+        "file_count": 1,
+        "trumpable": False,
+    }
+    movie_collision_entry = {
+        "id": 503,
+        "name": "Stick 1985 2160p WEB-DL DD 5.1 H.265-GROUP",
+        "size": "12.0 GB",
+        "res": "2160p",
+        "type": "WEBDL",
+        "download": "https://tracker.vietmediaf.store/torrents/download/503.torrent",
+        "files": [],
+        "file_count": 1,
+        "trumpable": False,
+    }
+
+    async def fake_super_search_existing(self, meta):
+        all_results = [dict(episode_entry), dict(multi_ep_entry), dict(movie_collision_entry)]
+        meta["VIETMEDIAF_title_releases"] = [dict(episode_entry), dict(multi_ep_entry), dict(movie_collision_entry)]
+        return all_results
+
+    monkeypatch.setattr("src.trackers.UNIT3D.UNIT3D.search_existing", fake_super_search_existing)
+
+    tv_meta = Meta(
+        name="Stick S02E01 2160p ATVP WEB-DL Dual-Audio DD 5.1 DV HDR10+ H.265-BiOMA",
+        title="Stick",
+        year="2025",
+        season="S02",
+        episode="E01",
+        resolution="2160p",
+        category="TV",
+        type="WEBDL",
+        source="Web",
+        is_disc=None,
+        filelist=["/downloads/Stick.S02E01.2160p.ATVP.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265.DUAL-BiOMA.mkv"],
+    )
+
+    dupes = await vmf.search_existing(tv_meta)
+    assert [d["id"] for d in dupes] == [501, 502]
+    assert [d["id"] for d in tv_meta["VIETMEDIAF_title_releases"]] == [501, 502]
+
+    decision = await evaluate_slots(dupes, tv_meta, "VIETMEDIAF", example_config)
+    assert decision is not None
+    assert decision.verdict == Verdict.BLOCK
+    assert decision.reason == "This exact release is already on the site."
+
+    movie_meta = Meta(
+        name="Stick 1985 2160p WEB-DL DD 5.1 H.265-GROUP",
+        title="Stick",
+        year="1985",
+        resolution="2160p",
+        category="MOVIE",
+        type="WEBDL",
+        source="Web",
+        is_disc=None,
+    )
+    movie_dupes = await vmf.search_existing(movie_meta)
+    assert [d["id"] for d in movie_dupes] == [503]
+    assert [d["id"] for d in movie_meta["VIETMEDIAF_title_releases"]] == [503]
+

@@ -566,7 +566,11 @@ class DupeChecker:
                 return False
 
             if meta.category == "MOVIE":
-                if re.search(r"\b[sS]\d{1,2}(?:[eE]\d{1,2})?\b|\b(?:season|series)\s*\d+\b", each, re.IGNORECASE):
+                if re.search(
+                    r"\b[sS]\d{1,2}(?:[eE]\d{1,3})*\b|\b(?:season|series|ep|episode)[.\s_-]*\d+\b|\b[eE]\d{2,3}\b",
+                    each,
+                    re.IGNORECASE,
+                ):
                     await log_exclusion("candidate has TV season/episode tag while upload is a Movie", each)
                     return True
 
