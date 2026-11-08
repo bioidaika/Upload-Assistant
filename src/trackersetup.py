@@ -1240,8 +1240,11 @@ class TrackerSetup:
             logger.debug(f"[bold green]Will make a trumpable report for this upload at {tracker}[/bold green]")
 
         if not meta.tv_pack:
-            if meta.unattended_auto:
-                logger.info(f"[bold green]{tracker}: Unattended auto mode (-uaa) enabled, automatically using comparison screenshots in description for trump report.[/bold green]")
+            if tracker == "VIETMEDIAF":
+                logger.debug(f"[bold green]Skipping comparison screenshot prompt for trump report on {tracker}[/bold green]")
+                return True
+            if meta.unattended_auto or meta.unattended:
+                logger.info(f"[bold green]{tracker}: Unattended mode enabled, automatically using comparison screenshots in description for trump report.[/bold green]")
                 meta.screenshots_in_description = True
                 return True
             logger.info(f"[yellow]{tracker} requires comparisons to be provided for trump reports.\nAre the comparison images in the description or are you adding links?")
@@ -1438,7 +1441,21 @@ class TrackerSetup:
             else ""
         )
 
-        reason_key = "season_pack" if meta.tv_pack else (meta.trump_reason or "trumpable_release")
+        specific_reasons = {
+            "missing_vietnamese_subtitles",
+            "missing_dual_vietnamese_audio",
+            "fewer_vietnamese_audio_tracks",
+            "bad_release_group",
+            "repack",
+            "hdr_upgrade",
+            "exact_match",
+        }
+        if meta.trump_reason in specific_reasons:
+            reason_key = meta.trump_reason
+        elif meta.tv_pack:
+            reason_key = "season_pack"
+        else:
+            reason_key = meta.trump_reason or "trumpable_release"
 
         reasons = {
             "missing_vietnamese_subtitles": (
@@ -1456,6 +1473,14 @@ class TrackerSetup:
             "bad_release_group": (
                 "Proper encode replacing bad release group (YIFY/YTS/mSD/MeGusta/FGT)",
                 "proper encode replacing bad release group",
+            ),
+            "repack": (
+                "REPACK/PROPER replacing original release",
+                "REPACK/PROPER replacement from the same release group",
+            ),
+            "hdr_upgrade": (
+                "Broader HDR package replacing existing release",
+                "broader HDR package replacement",
             ),
             "exact_match": (
                 "Exact filename trump",
@@ -1567,6 +1592,10 @@ class TrackerSetup:
                 message = f"{meta.ua_name} trump: release adds more Vietnamese audio tracks"
             elif meta.trump_reason == "bad_release_group":
                 message = f"{meta.ua_name} trump: proper encode replacing bad release group"
+            elif meta.trump_reason == "repack":
+                message = f"{meta.ua_name} trump: REPACK/PROPER replacing original release"
+            elif meta.trump_reason == "hdr_upgrade":
+                message = f"{meta.ua_name} trump: broader HDR package replacing existing release"
             elif meta.trump_reason == "trumpable_release":
                 message = f"{meta.ua_name} trumpable release trump"
             else:

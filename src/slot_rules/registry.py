@@ -106,7 +106,7 @@ async def evaluate_slots(dupes: Sequence[DupeInput], meta: Meta, tracker: str, c
     if isinstance(title_releases, list):
         dupes = cast(list[DupeInput], title_releases)
     try:
-        upload = profile_from_meta(meta)
+        upload = profile_from_meta(meta, provider=meta.service or await _provider(meta.name or ""))
         if upload.kind == DISC:
             return None
 

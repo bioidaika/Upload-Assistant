@@ -1220,3 +1220,83 @@ async def test_vietmediaf_search_existing_retains_tv_episodes(monkeypatch):
     assert [d["id"] for d in movie_dupes] == [503]
     assert [d["id"] for d in movie_meta["VIETMEDIAF_title_releases"]] == [503]
 
+
+@pytest.mark.asyncio
+async def test_vietmediaf_repack_season_pack_triggers_trump_report():
+    from src.dupe_checking import DupeChecker
+    from src.slot_rules.models import Verdict
+    from src.slot_rules.registry import evaluate_slots
+    from src.trackersetup import TrackerSetup
+    from src.uphelper import UploadHelper
+
+    existing_entry = {
+        "id": 777,
+        "name": "True Beauty 2024 AKA Yeosin Gangnim S01 1080p CR WEB-DL Dual-Audio DD+ 2.0 H.264-Kitsune",
+        "size": "14.5 GB",
+        "res": "1080p",
+        "type": "WEBDL",
+        "download": "https://tracker.vietmediaf.store/torrents/download/777.torrent",
+        "files": ["True.Beauty.2024.S01E01.1080p.CR.WEB-DL.DUAL.DDP2.0.H.264-Kitsune.mkv"],
+        "file_count": 13,
+        "trumpable": False,
+    }
+    dupes = [dict(existing_entry)]
+
+    meta = Meta(
+        name="True Beauty 2024 S01 REPACK 1080p CR WEB-DL Dual-Audio DD+ 2.0 H.264-Kitsune",
+        clean_name="True Beauty 2024 S01 REPACK 1080p CR WEB-DL Dual-Audio DD+ 2.0 H.264-Kitsune",
+        ua_name="Upload-Assistant",
+        uuid="True.Beauty.2024.S01.REPACK.1080p.CR.WEB-DL.DUAL.DDP2.0.H.264-Kitsune",
+        title="True Beauty",
+        year="2024",
+        season="S01",
+        episode="",
+        tv_pack=1,
+        resolution="1080p",
+        category="TV",
+        type="WEBDL",
+        source="Web",
+        video_codec="H.264",
+        tag="-Kitsune",
+        repack="REPACK",
+        is_disc=None,
+        unattended=True,
+        unattended_auto=False,
+        filelist=["/downloads/True.Beauty.2024.S01.REPACK.1080p.CR.WEB-DL.DUAL.DDP2.0.H.264-Kitsune/True.Beauty.2024.S01E01.REPACK.1080p.CR.WEB-DL.DUAL.DDP2.0.H.264-Kitsune.mkv"],
+        VIETMEDIAF_title_releases=[dict(existing_entry)],
+    )
+
+    slot_decision = await evaluate_slots(dupes, meta, "VIETMEDIAF", example_config)
+    assert slot_decision is not None
+    assert slot_decision.verdict == Verdict.ALLOW
+    assert "trump" in slot_decision.reason.lower()
+    assert len(slot_decision.conflicts) == 1
+    assert slot_decision.conflicts[0]["id"] == 777
+
+    checker = DupeChecker(example_config)
+    filtered_dupes = await checker.filter_dupes(dupes, meta, "VIETMEDIAF")
+    # filter_dupes excludes the non-REPACK release because of missing 'repack'
+    assert filtered_dupes == []
+
+    helper = UploadHelper(example_config)
+    is_dupe, updated_meta = await helper.dupe_check(filtered_dupes, meta, "VIETMEDIAF", slot_decision)
+    assert is_dupe is False
+    assert updated_meta.were_trumping is True
+    assert updated_meta.trump_reason == "repack"
+    assert updated_meta.get("VIETMEDIAF_trumpable_id") == 777
+    assert updated_meta.get("VIETMEDIAF_trumpable_name") == existing_entry["name"]
+
+    setup = TrackerSetup(example_config)
+    vmf = tracker()
+    msg = setup._build_trump_report_message(
+        updated_meta,
+        "VIETMEDIAF",
+        "777",
+        "888",
+        vmf,
+    )
+    assert "REPACK/PROPER replacing original release" in msg
+    assert "True Beauty 2024 AKA Yeosin Gangnim S01 1080p CR WEB-DL Dual-Audio DD+ 2.0 H.264-Kitsune (ID: 777)" in msg
+    assert "True Beauty 2024 S01 REPACK 1080p CR WEB-DL Dual-Audio DD+ 2.0 H.264-Kitsune (ID: 888)" in msg
+
+

@@ -357,6 +357,8 @@ class TrackerStatusManager:
                             were_trumping = local_meta.get("were_trumping", False)
                             trump_reason = local_meta.get("trump_reason")
                             trumpable_id_after_dupe_check = local_meta.get(f"{tracker_name}_trumpable_id")
+                            trumpable_name_after_dupe_check = local_meta.get(f"{tracker_name}_trumpable_name")
+                            generic_trumpable_name = local_meta.get("trumpable_name")
                             async with meta_lock:
                                 if were_trumping:
                                     meta.were_trumping = were_trumping
@@ -364,6 +366,10 @@ class TrackerStatusManager:
                                     meta.trump_reason = trump_reason
                                 if trumpable_id_after_dupe_check:
                                     meta[f"{tracker_name}_trumpable_id"] = trumpable_id_after_dupe_check
+                                if trumpable_name_after_dupe_check:
+                                    meta[f"{tracker_name}_trumpable_name"] = trumpable_name_after_dupe_check
+                                if generic_trumpable_name:
+                                    meta.trumpable_name = generic_trumpable_name
 
                     elif "skipping" in local_meta:
                         local_tracker_status["skipped"] = True
@@ -421,10 +427,20 @@ class TrackerStatusManager:
         # Now handle the confirmation/upload decisions
         if meta.unattended:
             passed_names: list[str] = []
+            trumping_names: list[str] = []
             for tracker_name, _display_name, _tracker_class in passed_trackers:
                 tracker_status[tracker_name]["upload"] = True
                 successful_trackers += 1
-                passed_names.append(tracker_name)
+                if meta.get("were_trumping") and (
+                    meta.get(f"{tracker_name}_trumpable_id")
+                    or meta.get(f"{tracker_name}_matched_id")
+                    or meta.get(f"{tracker_name}_matched_episode_ids")
+                ):
+                    trumping_names.append(tracker_name)
+                else:
+                    passed_names.append(tracker_name)
+            if trumping_names:
+                logger.info(f"[bold]{', '.join(trumping_names)}[/bold]: [bold green]proceeding with upload to trump existing release.[/bold green]")
             if passed_names:
                 logger.info(f"[bold]{', '.join(passed_names)}[/bold]: [bold green]no potential dupes found.[/bold green]")
         else:
