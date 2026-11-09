@@ -1502,7 +1502,7 @@ class TrackerSetup:
         url_part = f" ({trumping_url})" if trumping_url else ""
         delete_notice = (
             f"This torrent has been replaced by: {trumping_name}{url_part} - {notice_reason}. "
-            "Please download the new .torrent file and reseed!"
+            "Please consider downloading the new torrent and seeding!"
         )
         message = (
             f"Trump Report: {title}\n\n"

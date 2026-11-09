@@ -749,7 +749,7 @@ def test_vietmediaf_build_trump_report_message():
     assert "• Trumping torrent: Movie.2024.1080p.BluRay.x264.ViE-TEAM (ID: 222)" in msg
     assert "📋 Suggested deletion notice for staff to copy:" in msg
     assert "https://tracker.vietmediaf.store/torrents/222" in msg
-    assert "Please download the new .torrent file and reseed!" in msg
+    assert "Please consider downloading the new torrent and seeding!" in msg
     assert "(Note: User says comparison screenshots are in description)." in msg
 
 
