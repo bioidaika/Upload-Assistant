@@ -54,7 +54,7 @@ def test_vietmediaf_profile_uses_canonical_identity_and_unit3d_endpoints():
     assert vietmediaf.torrent_url == "https://tracker.vietmediaf.store/torrents/"
     assert vietmediaf.search_max_retries == -1
     assert vietmediaf.banned_groups == ()
-    assert vietmediaf.bad_release_groups == ("YIFY", "YTS", "mSD", "MeGusta", "FGT")
+    assert vietmediaf.bad_release_groups == ("YIFY", "YTS", "mSD", "MeGusta", "3cTWeB", "FGT")
 
 
 def test_vietmediaf_is_registered_as_unit3d_api_tracker_with_comment_host():
@@ -1298,5 +1298,99 @@ async def test_vietmediaf_repack_season_pack_triggers_trump_report():
     assert "REPACK/PROPER replacing original release" in msg
     assert "True Beauty 2024 AKA Yeosin Gangnim S01 1080p CR WEB-DL Dual-Audio DD+ 2.0 H.264-Kitsune (ID: 777)" in msg
     assert "True Beauty 2024 S01 REPACK 1080p CR WEB-DL Dual-Audio DD+ 2.0 H.264-Kitsune (ID: 888)" in msg
+
+
+@pytest.mark.asyncio
+async def test_vietmediaf_streaming_service_video_bitrate_trump_and_anti_bloat_guard():
+    from src.slot_rules.models import Verdict
+    from src.slot_rules.registry import evaluate_slots
+
+    existing_nf = {
+        "id": 901,
+        "name": "Sample Movie 2026 1080p NF WEB-DL DD+ 5.1 H.264-GROUP",
+        "size": "3.2 GB",
+        "res": "1080p",
+        "type": "WEBDL",
+        "trumpable": False,
+        "media_info": (
+            "Video\n"
+            "Format : AVC\n"
+            "Bit rate : 3 500 kb/s\n\n"
+            "Audio\n"
+            "Format : E-AC-3\n"
+            "Language : English\n\n"
+            "Text\n"
+            "Format : UTF-8\n"
+            "Language : Vietnamese\n"
+        ),
+    }
+
+    # Case 1: Clean AMZN WEB-DL with higher video bitrate (8000 kbps vs 3500 kbps) -> ALLOW trump
+    clean_amzn_meta = Meta(
+        name="Sample Movie 2026 1080p AMZN WEB-DL DD+ 5.1 H.264-BETTER",
+        clean_name="Sample Movie 2026 1080p AMZN WEB-DL DD+ 5.1 H.264-BETTER",
+        title="Sample Movie",
+        year="2026",
+        resolution="1080p",
+        category="MOVIE",
+        type="WEBDL",
+        source="Web",
+        service="AMZN",
+        video_codec="H.264",
+        original_language="en",
+        audio_languages=["English"],
+        subtitle_languages=["Vietnamese"],
+        mediainfo={
+            "media": {
+                "track": [
+                    {"@type": "General", "OverallBitRate": "8640000"},
+                    {"@type": "Video", "Format": "AVC", "BitRate": "8000000"},
+                    {"@type": "Audio", "Format": "E-AC-3", "Language": "en", "Title": "English"},
+                    {"@type": "Text", "Format": "UTF-8", "Language": "vi", "Title": "Vietnamese"},
+                ]
+            }
+        },
+        VIETMEDIAF_title_releases=[dict(existing_nf)],
+    )
+
+    decision_clean = await evaluate_slots([dict(existing_nf)], clean_amzn_meta, "VIETMEDIAF", example_config)
+    assert decision_clean is not None
+    assert decision_clean.verdict == Verdict.ALLOW
+    assert "higher video bitrate" in decision_clean.why.lower()
+
+    # Case 2: Bloated AMZN WEB-DL (contains extra Russian audio track) -> BLOCKED from trumping clean NF WEB-DL!
+    bloated_amzn_meta = Meta(
+        name="Sample Movie 2026 1080p AMZN WEB-DL Multi DD+ 5.1 H.264-BLOAT",
+        clean_name="Sample Movie 2026 1080p AMZN WEB-DL Multi DD+ 5.1 H.264-BLOAT",
+        title="Sample Movie",
+        year="2026",
+        resolution="1080p",
+        category="MOVIE",
+        type="WEBDL",
+        source="Web",
+        service="AMZN",
+        video_codec="H.264",
+        original_language="en",
+        audio_languages=["English", "Russian"],
+        subtitle_languages=["Vietnamese"],
+        mediainfo={
+            "media": {
+                "track": [
+                    {"@type": "General", "OverallBitRate": "9280000"},
+                    {"@type": "Video", "Format": "AVC", "BitRate": "8000000"},
+                    {"@type": "Audio", "Format": "E-AC-3", "Language": "en", "Title": "English"},
+                    {"@type": "Audio", "Format": "E-AC-3", "Language": "ru", "Title": "Russian Dub"},
+                    {"@type": "Text", "Format": "UTF-8", "Language": "vi", "Title": "Vietnamese"},
+                ]
+            }
+        },
+        VIETMEDIAF_title_releases=[dict(existing_nf)],
+    )
+
+    decision_bloated = await evaluate_slots([dict(existing_nf)], bloated_amzn_meta, "VIETMEDIAF", example_config)
+    assert decision_bloated is not None
+    assert decision_bloated.verdict == Verdict.BLOCK
+    assert "bloated" in decision_bloated.why.lower()
+
 
 

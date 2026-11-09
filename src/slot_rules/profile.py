@@ -45,6 +45,7 @@ RES_OTHER = "OTHER"
 _EDITION_PATTERNS: tuple[tuple[str, str], ...] = (
     ("directors", r"director'?s?[ .\-]*cut|\bdc\b|directors"),
     ("extended", r"extended"),
+    ("alternate_cut", r"alternat(?:e|ive)[ .\-]*(?:cut|ending|version)"),
     ("uncut", r"\buncut\b"),
     ("unrated", r"unrated"),
     ("imax", r"\bimax\b"),

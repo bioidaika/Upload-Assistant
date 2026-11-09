@@ -545,6 +545,8 @@ class UploadHelper:
                 meta.trump_reason = "fewer_vietnamese_audio_tracks"
             elif "hdr" in why_lower or "priority over" in why_lower:
                 meta.trump_reason = "hdr_upgrade"
+            elif "video bitrate" in why_lower:
+                meta.trump_reason = "higher_video_bitrate"
             elif meta.filename_match and meta.file_count_match:
                 meta.trump_reason = "exact_match"
             else:

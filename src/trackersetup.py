@@ -1448,6 +1448,7 @@ class TrackerSetup:
             "bad_release_group",
             "repack",
             "hdr_upgrade",
+            "higher_video_bitrate",
             "exact_match",
         }
         if meta.trump_reason in specific_reasons:
@@ -1481,6 +1482,10 @@ class TrackerSetup:
             "hdr_upgrade": (
                 "Broader HDR package replacing existing release",
                 "broader HDR package replacement",
+            ),
+            "higher_video_bitrate": (
+                "Superior streaming service release with higher video bitrate",
+                "superior streaming source with higher video bitrate",
             ),
             "exact_match": (
                 "Exact filename trump",

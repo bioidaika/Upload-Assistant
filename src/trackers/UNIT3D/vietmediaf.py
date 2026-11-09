@@ -15,7 +15,7 @@ class VietMediaF(UNIT3D):
     display_name = "VietMediaF"
     base_url = "https://tracker.vietmediaf.store"
     banned_groups: tuple[str, ...] = ()
-    bad_release_groups: tuple[str, ...] = ("YIFY", "YTS", "mSD", "MeGusta", "FGT")
+    bad_release_groups: tuple[str, ...] = ("YIFY", "YTS", "mSD", "MeGusta", "3cTWeB", "FGT")
     id_url = f"{base_url}/api/torrents/"
     upload_url = f"{base_url}/api/torrents/upload"
     requests_url = f"{base_url}/api/requests/filter"
@@ -463,12 +463,214 @@ class VietMediaF(UNIT3D):
                 has_vie = True
         return has_dub and has_vie
 
+    _streaming_service_pattern = re.compile(
+        r"(?<![A-Za-z0-9])(?P<srv>AMZN|Amazon|NF|Netflix|DSNP|ATVP|AppleTV\+|HMAX|MAX|PCOK|PMTP|HULU|CR|Crunchyroll|STAN|MA|iT|iTunes|BCORE|MUBI|VIKI|IQ|WETV|VIU|FPT|TV360|VIEON|GALAXY|KPLUS|DANET|BILI|BILIBILI|YOUKU|TENCENT)(?=[ .-]+(?:WEB[ .-]?(?:DL|Rip)|WEB\b))",
+        re.IGNORECASE,
+    )
+    _undetermined_lang_tokens = frozenset({"", "und", "unknown", "unspecified", "undefined", "zxx", "mul"})
+
+    @classmethod
+    def _extract_streaming_service(cls, name: str, meta_service: str | None = None) -> str | None:
+        if meta_service and str(meta_service).strip():
+            norm = str(meta_service).strip().upper()
+            aliases = {"AMAZON": "AMZN", "NETFLIX": "NF", "APPLETV+": "ATVP", "CRUNCHYROLL": "CR", "ITUNES": "IT", "BILIBILI": "BILI"}
+            return aliases.get(norm, norm)
+        match = cls._streaming_service_pattern.search(name or "")
+        if not match:
+            return None
+        norm = match.group("srv").upper()
+        aliases = {"AMAZON": "AMZN", "NETFLIX": "NF", "APPLETV+": "ATVP", "CRUNCHYROLL": "CR", "ITUNES": "IT", "BILIBILI": "BILI"}
+        return aliases.get(norm, norm)
+
+    @classmethod
+    def _video_bitrate_kbps_meta(cls, meta: Meta) -> int | None:
+        """Extract strictly the Video stream bitrate (kbps), never OverallBitRate (so audio tracks cannot inflate it)."""
+        from src.slot_rules.profile import _bitrate_kbps, parse_mediainfo_text
+
+        mediainfo = meta.mediainfo
+        if isinstance(mediainfo, dict):
+            media = mediainfo.get("media")
+            if isinstance(media, dict):
+                tracks = media.get("track", [])
+                if isinstance(tracks, list):
+                    for track in tracks:
+                        if not isinstance(track, dict):
+                            continue
+                        if str(track.get("@type", "")).casefold() == "video":
+                            raw = track.get("BitRate") or track.get("BitRate_Nominal")
+                            if raw is not None:
+                                try:
+                                    val = int(float(str(raw)) / 1000)
+                                    if val > 0:
+                                        return val
+                                except (ValueError, TypeError):
+                                    pass
+                            for str_key in ("BitRate_String", "BitRate_Nominal_String"):
+                                parsed = _bitrate_kbps(str(track.get(str_key) or ""))
+                                if parsed and parsed > 0:
+                                    return parsed
+        raw_text = str(mediainfo or "")
+        if raw_text and "video" in raw_text.lower():
+            for sec_name, fields in parse_mediainfo_text(raw_text):
+                if sec_name == "video":
+                    parsed = _bitrate_kbps(fields.get("bit rate") or fields.get("nominal bit rate"))
+                    if parsed and parsed > 0:
+                        return parsed
+        return None
+
+    @classmethod
+    def _video_bitrate_kbps_entry(cls, entry: dict[str, Any]) -> int | None:
+        """Extract strictly the Video stream bitrate (kbps) from an entry's MediaInfo text."""
+        from src.slot_rules.profile import _bitrate_kbps, parse_mediainfo_text
+
+        media_info = str(entry.get("media_info") or "")
+        if not media_info or "video" not in media_info.lower():
+            return None
+        for sec_name, fields in parse_mediainfo_text(media_info):
+            if sec_name == "video":
+                parsed = _bitrate_kbps(fields.get("bit rate") or fields.get("nominal bit rate"))
+                if parsed and parsed > 0:
+                    return parsed
+        return None
+
+    @classmethod
+    def _normalize_lang_code(cls, value: str | None) -> str | None:
+        from src.slot_rules.profile import _language_code
+
+        if not value:
+            return None
+        raw = str(value).strip()
+        if not raw or raw.casefold() in cls._undetermined_lang_tokens:
+            return "und"
+        norm = cls._normalized_words(raw)
+        if cls._vietnamese_language_tokens.intersection(norm.split()) or "tieng viet" in norm:
+            return "vi"
+        code = _language_code(raw)
+        return code if code else raw.casefold()
+
+    @classmethod
+    def _has_audio_bloat_meta(cls, meta: Meta) -> bool:
+        """Return True if the upload has undetermined (und) audio tracks or foreign audio bloat."""
+        from src.slot_rules.profile import parse_mediainfo_text
+
+        orig_raw = getattr(meta, "original_language", None) or meta.get("original_language")
+        if isinstance(orig_raw, list):
+            orig_raw = orig_raw[0] if orig_raw else None
+        orig_code = cls._normalize_lang_code(str(orig_raw)) if orig_raw else None
+        if orig_code == "und":
+            orig_code = None
+
+        track_langs: list[str] = []
+        mediainfo = meta.mediainfo
+        if isinstance(mediainfo, dict):
+            media = mediainfo.get("media")
+            if isinstance(media, dict):
+                tracks = media.get("track", [])
+                if isinstance(tracks, list):
+                    for track in tracks:
+                        if not isinstance(track, dict) or str(track.get("@type", "")).casefold() != "audio":
+                            continue
+                        title = str(track.get("Title") or track.get("title") or "")
+                        if "commentary" in title.casefold():
+                            continue
+                        lang_val = track.get("Language") or track.get("language") or track.get("Language_String")
+                        if not lang_val or str(lang_val).strip().casefold() in cls._undetermined_lang_tokens:
+                            # Check if Vietnamese title markers identify it
+                            title_norm = cls._normalized_words(title)
+                            if any(p.search(title_norm) for p in cls._dub_title_tokens) or any(p.search(title_norm) for p in cls._voice_over_title_tokens):
+                                track_langs.append("vi")
+                            else:
+                                return True
+                        else:
+                            track_langs.append(cls._normalize_lang_code(str(lang_val)) or "und")
+
+        if not track_langs and isinstance(mediainfo, str) and "audio" in mediainfo.lower():
+            for sec_name, fields in parse_mediainfo_text(mediainfo):
+                if sec_name != "audio":
+                    continue
+                if "commentary" in fields.get("title", "").casefold():
+                    continue
+                lang_val = fields.get("language", "")
+                if not lang_val or lang_val.strip().casefold() in cls._undetermined_lang_tokens:
+                    return True
+                track_langs.append(cls._normalize_lang_code(lang_val) or "und")
+
+        if not track_langs and meta.audio_languages:
+            raw_list = [meta.audio_languages] if isinstance(meta.audio_languages, str) else list(meta.audio_languages)
+            for item in raw_list:
+                track_langs.append(cls._normalize_lang_code(str(item)) or "und")
+
+        if not track_langs:
+            return False
+
+        if "und" in track_langs:
+            return True
+
+        distinct_langs = set(track_langs)
+        if orig_code:
+            allowed = {"vi", orig_code}
+            return not distinct_langs.issubset(allowed)
+
+        # Fallback when original_language is unknown: at most 1 non-Vietnamese language is allowed
+        non_vi = distinct_langs - {"vi"}
+        return len(non_vi) >= 2
+
+    @classmethod
+    def _has_audio_bloat_entry(cls, entry: dict[str, Any], orig_lang: str | None = None) -> bool:
+        """Return True if an existing tracker entry has undetermined (und) audio or foreign audio bloat."""
+        from src.slot_rules.profile import parse_mediainfo_text
+
+        media_info = str(entry.get("media_info") or "")
+        if not media_info or "audio" not in media_info.lower():
+            return False
+
+        orig_code = cls._normalize_lang_code(orig_lang) if orig_lang else None
+        if orig_code == "und":
+            orig_code = None
+
+        track_langs: list[str] = []
+        for sec_name, fields in parse_mediainfo_text(media_info):
+            if sec_name != "audio":
+                continue
+            title = fields.get("title", "")
+            if "commentary" in title.casefold():
+                continue
+            lang_val = fields.get("language", "")
+            if not lang_val or lang_val.strip().casefold() in cls._undetermined_lang_tokens:
+                title_norm = cls._normalized_words(title)
+                if any(p.search(title_norm) for p in cls._dub_title_tokens) or any(p.search(title_norm) for p in cls._voice_over_title_tokens):
+                    track_langs.append("vi")
+                else:
+                    return True
+            else:
+                track_langs.append(cls._normalize_lang_code(lang_val) or "und")
+
+        if not track_langs:
+            return False
+        if "und" in track_langs:
+            return True
+
+        distinct_langs = set(track_langs)
+        if orig_code:
+            allowed = {"vi", orig_code}
+            return not distinct_langs.issubset(allowed)
+
+        non_vi = distinct_langs - {"vi"}
+        return len(non_vi) >= 2
+
     def _apply_vietnamese_trump_rules(self, meta: Meta, dupes: list[dict[str, Any]]) -> None:
         upload_slot = self._meta_audio_slot(meta)
         has_vi_sub_upload = self._has_vietnamese_subtitles_meta(meta)
         has_dual_vi_upload = self._has_dual_vietnamese_audio_meta(meta)
         upload_vi_audio_count = self._count_vietnamese_audio_tracks_meta(meta)
         upload_name = meta.name or ""
+        upload_has_bloat = self._has_audio_bloat_meta(meta)
+        upload_video_kbps = self._video_bitrate_kbps_meta(meta)
+        upload_srv = self._extract_streaming_service(upload_name, getattr(meta, "service", None))
+        orig_raw = getattr(meta, "original_language", None) or meta.get("original_language")
+        if isinstance(orig_raw, list):
+            orig_raw = orig_raw[0] if orig_raw else None
+        orig_lang_str = str(orig_raw) if orig_raw else None
 
         for entry in dupes:
             if not isinstance(entry, dict):
@@ -490,6 +692,17 @@ class VietMediaF(UNIT3D):
             if meta.category == "TV" and not self._is_tv_release_name(entry_name):
                 if entry.get("trumpable", False):
                     entry["trumpable"] = False
+                continue
+
+            # Safeguard: An upload with audio bloat MUST NEVER trump a clean torrent without audio bloat
+            entry_has_bloat = self._has_audio_bloat_entry(entry, orig_lang_str)
+            if upload_has_bloat and not entry_has_bloat:
+                if entry.get("trumpable", False):
+                    entry["trumpable"] = False
+                logger.debug(
+                    f"{self.tracker}: Skipping trump of torrent {entry.get('id')} ({entry_name}) "
+                    f"because your upload contains audio bloat while the existing torrent has clean audio."
+                )
                 continue
 
             # 1. Bad Release Group trumping
@@ -539,6 +752,31 @@ class VietMediaF(UNIT3D):
                         logger.info(
                             f"[bold green]{self.tracker}: Torrent {entry.get('id')} ({entry_name}) "
                             f"has fewer Vietnamese audio tracks ({entry_vi_audio_count}) while your upload has {upload_vi_audio_count}. Marked as trumpable![/bold green]"
+                        )
+                        continue
+
+            # 4. Different Streaming Service Video Bitrate Upgrade Trump (WEB-DL only, clean audio required)
+            entry_srv = self._extract_streaming_service(entry_name)
+            if (
+                not upload_has_bloat
+                and not self._is_bad_release_group(upload_name)
+                and upload_srv
+                and entry_srv
+                and upload_srv != entry_srv
+                and upload_video_kbps
+                and self._entry_has_mediainfo(entry)
+            ):
+                # Ensure upload does not downgrade Vietnamese subtitles or Vietnamese audio track count
+                entry_has_vi_sub = self._has_vietnamese_subtitles_entry(entry)
+                entry_vi_audio_count = self._count_vietnamese_audio_tracks_entry(entry)
+                if (has_vi_sub_upload or not entry_has_vi_sub) and upload_vi_audio_count >= entry_vi_audio_count:
+                    entry_video_kbps = self._video_bitrate_kbps_entry(entry)
+                    if entry_video_kbps and upload_video_kbps >= int(entry_video_kbps * 1.20) and (upload_video_kbps - entry_video_kbps) >= 500:
+                        entry["trumpable"] = True
+                        entry["trump_reason"] = "higher_video_bitrate"
+                        logger.info(
+                            f"[bold green]{self.tracker}: Torrent {entry.get('id')} ({entry_name}) "
+                            f"is from {entry_srv} ({entry_video_kbps} kbps video) while your clean {upload_srv} upload has {upload_video_kbps} kbps video. Marked as trumpable![/bold green]"
                         )
 
     async def get_search_urls(self, meta: Meta, request_params: Any) -> list[tuple[str, Any, bool]]:
