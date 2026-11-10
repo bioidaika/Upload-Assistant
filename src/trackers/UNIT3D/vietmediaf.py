@@ -5,6 +5,7 @@ from typing import Any, cast
 
 from src.console import logger
 from src.meta import Meta
+from src.slot_rules.profile import DV, HDR10, HDR10P, HLG, PQ10, hdr_from_meta_value, hdr_from_name
 from src.trackers.UNIT3D import UNIT3D
 
 
@@ -658,8 +659,46 @@ class VietMediaF(UNIT3D):
         non_vi = distinct_langs - {"vi"}
         return len(non_vi) >= 2
 
+    @classmethod
+    def _hdr_flags_from_meta(cls, meta: Meta) -> frozenset[str]:
+        hdr = hdr_from_meta_value(getattr(meta, "hdr", None))
+        if hdr:
+            return hdr
+        return hdr_from_name(str(getattr(meta, "name", "") or ""))
+
+    @classmethod
+    def _hdr_flags_from_entry(cls, entry: dict[str, Any]) -> frozenset[str]:
+        return hdr_from_name(str(entry.get("name") or ""))
+
+    @classmethod
+    def _dynamic_range_slot(cls, hdr: frozenset[str] | set[str]) -> str:
+        if not hdr:
+            return "SDR"
+        if hdr == {DV}:
+            return "DV"
+        return "HDR"
+
+    @classmethod
+    def _hdr_rank_flags(cls, hdr: frozenset[str] | set[str]) -> int:
+        if DV in hdr and HDR10P in hdr:
+            return 4
+        if (DV in hdr and HDR10 in hdr) or HDR10P in hdr:
+            return 3
+        if HDR10 in hdr:
+            return 2
+        if PQ10 in hdr or HLG in hdr:
+            return 1
+        return 0
+
+    @classmethod
+    def _expanded_hdr_flags(cls, hdr: frozenset[str] | set[str]) -> frozenset[str]:
+        base = frozenset(hdr)
+        return base | {HDR10} if HDR10P in base else base
+
     def _apply_vietnamese_trump_rules(self, meta: Meta, dupes: list[dict[str, Any]]) -> None:
         upload_slot = self._meta_audio_slot(meta)
+        upload_hdr_flags = self._hdr_flags_from_meta(meta)
+        upload_hdr_slot = self._dynamic_range_slot(upload_hdr_flags)
         has_vi_sub_upload = self._has_vietnamese_subtitles_meta(meta)
         has_dual_vi_upload = self._has_dual_vietnamese_audio_meta(meta)
         upload_vi_audio_count = self._count_vietnamese_audio_tracks_meta(meta)
@@ -677,9 +716,11 @@ class VietMediaF(UNIT3D):
                 continue
             entry_name = str(entry.get("name") or "")
             entry_slot = self._entry_audio_slot(entry)
+            entry_hdr_flags = self._hdr_flags_from_entry(entry)
+            entry_hdr_slot = self._dynamic_range_slot(entry_hdr_flags)
 
-            # Different slot: cannot trump cross-slot. Reset trumpable if tracker API marked it
-            if upload_slot != entry_slot:
+            # Different slot (audio or dynamic range): cannot trump cross-slot. Reset trumpable if tracker API marked it
+            if upload_slot != entry_slot or upload_hdr_slot != entry_hdr_slot:
                 if entry.get("trumpable", False):
                     entry["trumpable"] = False
                 continue
@@ -755,7 +796,26 @@ class VietMediaF(UNIT3D):
                         )
                         continue
 
-            # 4. Different Streaming Service Video Bitrate Upgrade Trump (WEB-DL only, clean audio required)
+            # 4. Broader HDR package upgrade within the same HDR slot (e.g. DV+HDR10+ or DV+HDR10 over HDR10)
+            if (
+                upload_hdr_slot == "HDR"
+                and not upload_has_bloat
+                and not self._is_bad_release_group(upload_name)
+                and self._hdr_rank_flags(upload_hdr_flags) > self._hdr_rank_flags(entry_hdr_flags)
+                and self._expanded_hdr_flags(entry_hdr_flags) <= self._expanded_hdr_flags(upload_hdr_flags)
+            ):
+                entry_has_vi_sub = self._has_vietnamese_subtitles_entry(entry) if self._entry_has_mediainfo(entry) else False
+                entry_vi_audio_count = self._count_vietnamese_audio_tracks_entry(entry) if self._entry_has_mediainfo(entry) else 0
+                if (has_vi_sub_upload or not entry_has_vi_sub) and upload_vi_audio_count >= entry_vi_audio_count:
+                    entry["trumpable"] = True
+                    entry["trump_reason"] = "hdr_upgrade"
+                    logger.info(
+                        f"[bold green]{self.tracker}: Torrent {entry.get('id')} ({entry_name}) "
+                        f"has a narrower HDR package than your upload. Marked as trumpable![/bold green]"
+                    )
+                    continue
+
+            # 5. Different Streaming Service Video Bitrate Upgrade Trump (WEB-DL only, clean audio required)
             entry_srv = self._extract_streaming_service(entry_name)
             if (
                 not upload_has_bloat
@@ -765,6 +825,7 @@ class VietMediaF(UNIT3D):
                 and upload_srv != entry_srv
                 and upload_video_kbps
                 and self._entry_has_mediainfo(entry)
+                and self._expanded_hdr_flags(entry_hdr_flags) <= self._expanded_hdr_flags(upload_hdr_flags)
             ):
                 # Ensure upload does not downgrade Vietnamese subtitles or Vietnamese audio track count
                 entry_has_vi_sub = self._has_vietnamese_subtitles_entry(entry)

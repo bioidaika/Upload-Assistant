@@ -1393,4 +1393,180 @@ async def test_vietmediaf_streaming_service_video_bitrate_trump_and_anti_bloat_g
     assert "bloated" in decision_bloated.why.lower()
 
 
+@pytest.mark.asyncio
+async def test_vietmediaf_dynamic_range_slots_prevent_hdr_trumping_sdr():
+    from src.dupe_checking import DupeChecker
+    from src.slot_rules.models import Verdict
+    from src.slot_rules.registry import evaluate_slots
+    from src.uphelper import UploadHelper
+
+    vmf = tracker()
+    sdr_pmtp = {
+        "id": 9424,
+        "name": "Star Trek Beyond 2016 2160p PMTP WEB-DL DD+ 5.1 H.265-HONE",
+        "size": "14.2 GB",
+        "res": "2160p",
+        "type": "WEBDL",
+        "trumpable": False,
+        "media_info": (
+            "Video\n"
+            "Format : HEVC\n"
+            "Bit rate : 12 000 kb/s\n\n"
+            "Audio\n"
+            "Format : E-AC-3\n"
+            "Language : English\n"
+        ),
+    }
+
+    dv_hdr10p_meta = Meta(
+        name="Star Trek Beyond 2016 2160p ATVP WEB-DL TrueHD 7.1 Atmos DV HDR10+ H.265-Kitsune",
+        clean_name="Star Trek Beyond 2016 2160p ATVP WEB-DL TrueHD 7.1 Atmos DV HDR10+ H.265-Kitsune",
+        title="Star Trek Beyond",
+        year="2016",
+        resolution="2160p",
+        category="MOVIE",
+        type="WEBDL",
+        source="Web",
+        service="ATVP",
+        video_codec="H.265",
+        hdr="DV HDR10+",
+        original_language="en",
+        audio_languages=["English"],
+        subtitle_languages=["Vietnamese"],
+        unattended=True,
+        mediainfo={
+            "media": {
+                "track": [
+                    {"@type": "General", "OverallBitRate": "26000000"},
+                    {"@type": "Video", "Format": "HEVC", "BitRate": "25000000"},
+                    {"@type": "Audio", "Format": "MLP FBA", "Language": "en", "Title": "English"},
+                    {"@type": "Text", "Format": "UTF-8", "Language": "vi", "Title": "Vietnamese"},
+                ]
+            }
+        },
+        VIETMEDIAF_title_releases=[dict(sdr_pmtp)],
+    )
+
+    dupes = [dict(sdr_pmtp)]
+    vmf._apply_vietnamese_trump_rules(dv_hdr10p_meta, dupes)
+    assert dupes[0]["trumpable"] is False
+
+    slot_decision = await evaluate_slots(dupes, dv_hdr10p_meta, "VIETMEDIAF", example_config)
+    assert slot_decision is not None
+    assert slot_decision.verdict == Verdict.ALLOW
+    assert slot_decision.reason == "No release on the site is using this slot yet."
+    assert slot_decision.conflicts == []
+    assert "HDR" in slot_decision.slot
+
+    checker = DupeChecker(example_config)
+    filtered = await checker.filter_dupes(dupes, dv_hdr10p_meta, "VIETMEDIAF")
+    assert filtered == []
+
+    helper = UploadHelper(example_config)
+    is_dupe, updated_meta = await helper.dupe_check(filtered, dv_hdr10p_meta, "VIETMEDIAF", slot_decision)
+    assert is_dupe is False
+    assert updated_meta.were_trumping is False
+
+
+@pytest.mark.asyncio
+async def test_vietmediaf_hdr_upgrade_trumps_narrower_hdr_in_same_slot():
+    from src.dupe_checking import DupeChecker
+    from src.slot_rules.models import Verdict
+    from src.slot_rules.registry import evaluate_slots
+    from src.uphelper import UploadHelper
+
+    vmf = tracker()
+    hdr10_pmtp = {
+        "id": 9425,
+        "name": "Star Trek Beyond 2016 2160p PMTP WEB-DL DD+ 5.1 HDR H.265-HONE",
+        "size": "15.0 GB",
+        "res": "2160p",
+        "type": "WEBDL",
+        "trumpable": False,
+        "media_info": (
+            "Video\n"
+            "Format : HEVC\n"
+            "HDR format : SMPTE ST 2086, HDR10 compatible\n"
+            "Bit rate : 20 000 kb/s\n\n"
+            "Audio\n"
+            "Format : E-AC-3\n"
+            "Language : English\n"
+        ),
+    }
+
+    dv_hdr10p_meta = Meta(
+        name="Star Trek Beyond 2016 2160p ATVP WEB-DL TrueHD 7.1 Atmos DV HDR10+ H.265-Kitsune",
+        clean_name="Star Trek Beyond 2016 2160p ATVP WEB-DL TrueHD 7.1 Atmos DV HDR10+ H.265-Kitsune",
+        title="Star Trek Beyond",
+        year="2016",
+        resolution="2160p",
+        category="MOVIE",
+        type="WEBDL",
+        source="Web",
+        service="ATVP",
+        video_codec="H.265",
+        hdr="DV HDR10+",
+        original_language="en",
+        audio_languages=["English"],
+        unattended=True,
+        mediainfo={
+            "media": {
+                "track": [
+                    {"@type": "General", "OverallBitRate": "22000000"},
+                    {"@type": "Video", "Format": "HEVC", "BitRate": "21000000"},
+                    {"@type": "Audio", "Format": "MLP FBA", "Language": "en", "Title": "English"},
+                ]
+            }
+        },
+        VIETMEDIAF_title_releases=[dict(hdr10_pmtp)],
+    )
+
+    dupes = [dict(hdr10_pmtp)]
+    vmf._apply_vietnamese_trump_rules(dv_hdr10p_meta, dupes)
+    assert dupes[0]["trumpable"] is True
+    assert dupes[0]["trump_reason"] == "hdr_upgrade"
+
+    slot_decision = await evaluate_slots(dupes, dv_hdr10p_meta, "VIETMEDIAF", example_config)
+    assert slot_decision is not None
+    assert slot_decision.verdict == Verdict.ALLOW
+    assert "takes priority over" in slot_decision.why
+    assert len(slot_decision.conflicts) == 1
+    assert slot_decision.conflicts[0]["id"] == 9425
+
+    checker = DupeChecker(example_config)
+    filtered = await checker.filter_dupes(dupes, dv_hdr10p_meta, "VIETMEDIAF")
+    helper = UploadHelper(example_config)
+    is_dupe, updated_meta = await helper.dupe_check(filtered, dv_hdr10p_meta, "VIETMEDIAF", slot_decision)
+    assert is_dupe is False
+    assert updated_meta.were_trumping is True
+    assert updated_meta.trump_reason == "hdr_upgrade"
+    assert updated_meta.get("VIETMEDIAF_trumpable_id") == 9425
+
+    # DV-only (Profile 5 without HDR10 fallback) is in its own 'DV' slot and coexists with HDR10
+    dv_only_meta = Meta(
+        name="Star Trek Beyond 2016 2160p ATVP WEB-DL DD+ 5.1 DV H.265-GRP",
+        clean_name="Star Trek Beyond 2016 2160p ATVP WEB-DL DD+ 5.1 DV H.265-GRP",
+        title="Star Trek Beyond",
+        year="2016",
+        resolution="2160p",
+        category="MOVIE",
+        type="WEBDL",
+        source="Web",
+        service="ATVP",
+        video_codec="H.265",
+        hdr="DV",
+        original_language="en",
+        audio_languages=["English"],
+        unattended=True,
+        VIETMEDIAF_title_releases=[dict(hdr10_pmtp)],
+    )
+    dv_slot_decision = await evaluate_slots([dict(hdr10_pmtp)], dv_only_meta, "VIETMEDIAF", example_config)
+    assert dv_slot_decision is not None
+    assert dv_slot_decision.verdict == Verdict.ALLOW
+    assert dv_slot_decision.reason == "No release on the site is using this slot yet."
+    assert dv_slot_decision.conflicts == []
+    assert "DV" in dv_slot_decision.slot
+
+
+
 

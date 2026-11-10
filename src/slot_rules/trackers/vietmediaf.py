@@ -2,15 +2,35 @@
 """VietMediaF slot rules: Original, ViE (Voice-over), and ViE DUB (Dubbed) slots."""
 
 from collections.abc import Sequence
+from dataclasses import replace
 
-from src.slot_rules.base import SlotKey, SlotRules, slot_label
+from src.slot_rules.base import SlotKey, SlotRules, expanded_hdr, slot_label
 from src.slot_rules.models import SlotDecision, Verdict
-from src.slot_rules.profile import WEBDL, ReleaseProfile
+from src.slot_rules.profile import DV, WEBDL, ReleaseProfile, hdr_from_name
 from src.trackers.UNIT3D.vietmediaf import VietMediaF
 
 
 class VietMediaFSlotRules(SlotRules):
     TRACKER = "VIETMEDIAF"
+
+    def _effective_hdr(self, profile: ReleaseProfile) -> frozenset[str]:
+        if profile.hdr:
+            return profile.hdr
+        return hdr_from_name(profile.name)
+
+    def _with_effective_hdr(self, profile: ReleaseProfile) -> ReleaseProfile:
+        hdr = self._effective_hdr(profile)
+        if profile.hdr == hdr:
+            return profile
+        return replace(profile, hdr=hdr)
+
+    def dynamic_range(self, profile: ReleaseProfile) -> str:
+        hdr = self._effective_hdr(profile)
+        if not hdr:
+            return "SDR"
+        if hdr == frozenset({DV}):
+            return "DV"
+        return "HDR"
 
     def audio_slot(self, profile: ReleaseProfile) -> str:
         tag = VietMediaF._existing_audio_tag(profile.name)
@@ -29,8 +49,9 @@ class VietMediaFSlotRules(SlotRules):
         res = self.require(profile.resolution, "resolution")
         kind = self.require(profile.kind, "release type")
         codec = self.require(profile.codec, "video codec")
+        hdr_slot = self.dynamic_range(profile)
         audio = self.audio_slot(profile)
-        return (res, kind, codec, audio, profile.edition)
+        return (res, kind, codec, hdr_slot, audio, profile.edition)
 
     def _upload_has_audio_bloat(self, upload: ReleaseProfile) -> bool:
         if self.meta is not None and VietMediaF._has_audio_bloat_meta(self.meta):
@@ -65,6 +86,11 @@ class VietMediaFSlotRules(SlotRules):
         return False
 
     def vietmediaf_trump(self, upload: ReleaseProfile, existing: ReleaseProfile) -> tuple[Verdict, str]:
+        if self.dynamic_range(upload) != self.dynamic_range(existing):
+            return Verdict.BLOCK, ""
+
+        upload_norm = self._with_effective_hdr(upload)
+        existing_norm = self._with_effective_hdr(existing)
         upload_has_bloat = self._upload_has_audio_bloat(upload)
         existing_has_bloat = self._existing_has_audio_bloat(existing)
 
@@ -73,7 +99,7 @@ class VietMediaFSlotRules(SlotRules):
             return Verdict.BLOCK, "Your upload contains bloated or undetermined audio tracks while the existing release has clean audio."
 
         # 1. Repack check
-        repack_verdict, repack_reason = self.default_trump(upload, existing)
+        repack_verdict, repack_reason = self.default_trump(upload_norm, existing_norm)
         if repack_verdict is Verdict.ALLOW:
             return repack_verdict, repack_reason
 
@@ -121,7 +147,18 @@ class VietMediaFSlotRules(SlotRules):
                         f"Your release has more Vietnamese audio tracks ({upload_vi_count}) than the existing release ({existing_vi_count}).",
                     )
 
-        # 5. Different Streaming Service Video Bitrate Upgrade Trump (WEB-DL only, clean audio required)
+        # 5. Broader HDR package upgrade within the same HDR slot (e.g. DV+HDR10+ or DV+HDR10 over HDR10)
+        if (
+            not upload_has_bloat
+            and not VietMediaF._is_bad_release_group(upload.name)
+            and (upload_vi_sub or not existing_vi_sub)
+            and upload_vi_count >= existing_vi_count
+        ):
+            hdr_verdict, hdr_reason = self.hdr_trump(upload_norm, existing_norm)
+            if hdr_verdict is Verdict.ALLOW:
+                return hdr_verdict, hdr_reason
+
+        # 6. Different Streaming Service Video Bitrate Upgrade Trump (WEB-DL only, clean audio required)
         upload_srv = VietMediaF._extract_streaming_service(upload.name, upload.provider)
         existing_srv = VietMediaF._extract_streaming_service(existing.name, existing.provider)
         if (
@@ -134,6 +171,7 @@ class VietMediaFSlotRules(SlotRules):
             and upload_srv != existing_srv
             and (upload_vi_sub or not existing_vi_sub)
             and upload_vi_count >= existing_vi_count
+            and expanded_hdr(existing_norm) <= expanded_hdr(upload_norm)
         ):
             upload_kbps = (VietMediaF._video_bitrate_kbps_meta(self.meta) if self.meta is not None else None) or upload.video_bitrate_kbps
             existing_kbps = VietMediaF._video_bitrate_kbps_entry(existing_entry) or existing.video_bitrate_kbps
@@ -154,5 +192,5 @@ class VietMediaFSlotRules(SlotRules):
             self.key,
             label,
             trump=self.vietmediaf_trump,
-            notes=["VietMediaF allows Original audio, ViE (Voice-over), and ViE DUB to coexist in separate slots."],
+            notes=["VietMediaF allows Original audio, ViE (Voice-over), and ViE DUB, as well as SDR, DV, and HDR dynamic ranges, to coexist in separate slots."],
         )
