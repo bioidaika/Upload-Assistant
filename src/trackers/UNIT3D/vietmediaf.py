@@ -3,10 +3,13 @@ import re
 import unicodedata
 from typing import Any, cast
 
+import httpx
+
 from src.console import logger
 from src.meta import Meta
 from src.slot_rules.profile import DV, HDR10, HDR10P, HLG, PQ10, hdr_from_meta_value, hdr_from_name
 from src.trackers.UNIT3D import UNIT3D
+from src.trump_reports import TrumpPlan, TrumpSupport
 
 
 class VietMediaF(UNIT3D):
@@ -22,6 +25,8 @@ class VietMediaF(UNIT3D):
     requests_url = f"{base_url}/api/requests/filter"
     search_url = f"{base_url}/api/torrents/filter"
     trumping_url = f"{base_url}/api/trumping-reports/filter"
+    trump_reports_url = f"{base_url}/api/trumping-reports"
+    trump_support = TrumpSupport(searchable=True, comparison=False)
     torrent_url = f"{base_url}/torrents/"
     supported_categories = ("MOVIE", "TV")
     tracker_urls = (base_url,)
@@ -870,6 +875,54 @@ class VietMediaF(UNIT3D):
             meta[f"{self.tracker}_title_releases"] = title_releases
             self._apply_vietnamese_trump_rules(meta, title_releases)
         return dupes
+
+    async def find_trump_reports(self, meta: Meta, reported_id: str) -> list[dict[str, Any]] | None:
+        """Trump reports already filed for a torrent on VietMediaF; None when the site could not be searched."""
+        _ = meta
+        headers = {"Authorization": f"Bearer {self.api_key}", "Accept": "application/json"}
+        params: dict[str, str] = {"reported_torrent_id": str(reported_id)}
+        reports: list[dict[str, Any]] = []
+        requested_cursors: set[str] = set()
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                while True:
+                    response = await client.get(f"{self.trump_reports_url}/filter", headers=headers, params=params)
+                    if response.status_code != 200:
+                        logger.info(f"[bold red]{self.tracker}: failed to search trump reports. HTTP Status: {response.status_code}[/bold red]")
+                        return None
+                    data: Any = response.json()
+                    body = cast(dict[str, Any], data) if isinstance(data, dict) else {}
+                    page: Any = body.get("data") if isinstance(body.get("data"), list) else body.get("results")
+                    if not isinstance(page, list):
+                        logger.info(f"[bold red]{self.tracker}: unexpected trump report search response.[/bold red]")
+                        return None
+                    for item in cast(list[Any], page):
+                        if not isinstance(item, dict):
+                            continue
+                        entry = cast(dict[str, Any], item)
+                        trumping = entry.get("trumping_torrent")
+                        torrents: list[Any] = [trumping] if isinstance(trumping, dict) else cast(list[Any], trumping) if isinstance(trumping, list) else []
+                        reports.append({"id": entry.get("id"), "title": entry.get("title"), "solved": entry.get("solved"), "trumping_torrent": torrents})
+                    meta_info = body.get("meta")
+                    next_cursor = cast(dict[str, Any], meta_info).get("next_cursor") if isinstance(meta_info, dict) else None
+                    if not next_cursor:
+                        return reports
+                    if str(next_cursor) in requested_cursors:
+                        logger.info(f"[bold red]{self.tracker}: the trump report search repeated a page.[/bold red]")
+                        return None
+                    requested_cursors.add(str(next_cursor))
+                    params["cursor"] = str(next_cursor)
+        except (httpx.HTTPError, ValueError) as e:
+            logger.info(f"[bold red]{self.tracker}: failed to search trump reports: {e}[/bold red]")
+            return None
+
+    def trump_report_request(self, plan: TrumpPlan, trumping_id: Any, message: str) -> tuple[str, dict[str, Any]]:
+        payload: dict[str, Any] = {
+            "reported_torrent_id": plan.reported_id,
+            "trumping_torrent_id": trumping_id,
+            "message": message,
+        }
+        return f"{self.trump_reports_url}/create", payload
 
     async def search_torrents(self, meta: Meta) -> list[dict[str, Any]]:
         return await self.search_existing(meta)
