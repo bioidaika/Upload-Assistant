@@ -18,18 +18,23 @@ import os
 import sqlite3
 import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from contextlib import closing
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeIs, cast
 
 from src import webui_events
 from src.app_db import connect as connect_app_db
 from src.app_db import database_available, database_path
 from src.console import logger
+
+
+def _is_str_dict(val: object) -> TypeIs[dict[str, Any]]:
+    return isinstance(val, dict)
+
 
 # Files below this size (NFOs, checksums, small artwork) change without the
 # release changing, so they are left out of the fingerprint when larger ones exist.
@@ -161,8 +166,11 @@ def content_fingerprint(path: str | Path) -> str:
     return sha256("\n".join(f"{name}\t{size}" for name, size in chosen).encode("utf-8")).hexdigest()
 
 
-def _text(value: object, limit: int = webui_events.MAX_TEXT_LENGTH, *, markup: bool = True) -> str:
-    """Return redacted plain text; ``markup=False`` keeps literal brackets, as in release names."""
+def _text(value: object, limit: int = webui_events.MAX_TEXT_LENGTH, *, markup: bool = True, public_ids: Iterable[object] = ()) -> str:
+    """Return redacted plain text; ``markup=False`` keeps literal brackets, as in release names.
+
+    ``public_ids`` are hash-like identifiers that stay visible, such as a torrent ID.
+    """
     if value in (None, ""):
         return ""
     if isinstance(value, (Mapping, list)):
@@ -170,12 +178,12 @@ def _text(value: object, limit: int = webui_events.MAX_TEXT_LENGTH, *, markup: b
             value = json.dumps(value, default=str)
         except TypeError, ValueError:
             value = str(value)
-    return webui_events.plain_text(value, limit, markup=markup)
+    return webui_events.plain_text(value, limit, markup=markup, public_ids=public_ids)
 
 
-def _http_link(value: object) -> str:
+def _http_link(value: object, public_ids: Iterable[object] = ()) -> str:
     """Return ``value`` when it is an http(s) link, otherwise ""."""
-    link = _text(value, 2000, markup=False)
+    link = _text(value, 2000, markup=False, public_ids=public_ids)
     return link if link.lower().startswith(("http://", "https://")) else ""
 
 
@@ -253,17 +261,18 @@ def external_ids(meta: Any) -> dict[str, str]:
 
 def _tracker_link(status: Mapping[str, Any], tracker_class: Any) -> str:
     """Return the torrent page from the status, or from the tracker's torrent URL and the torrent ID."""
-    link = _http_link(status.get("torrent_link"))
     torrent_id = status.get("torrent_id")
+    link = _http_link(status.get("torrent_link"), public_ids=(torrent_id,))
     if not link and torrent_id not in (None, ""):
-        link = _http_link(f"{getattr(tracker_class, 'torrent_url', '')}{torrent_id}")
+        link = _http_link(f"{getattr(tracker_class, 'torrent_url', '')}{torrent_id}", public_ids=(torrent_id,))
     return link
 
 
-def _usenet_row(meta: Any, upload_started: bool) -> dict[str, Any] | None:
+def _usenet_row(meta: object, upload_started: bool) -> dict[str, Any] | None:
     """Return the result of an NNTP post the run asked for, which has no tracker status of its own."""
-    trackers = getattr(meta, "trackers", None) or []
-    requested = bool(getattr(meta, "usenet", False)) or "USENET" in {_tracker_key(tracker) for tracker in trackers if isinstance(tracker, str)}
+    trackers_raw: object = getattr(meta, "trackers", None)
+    trackers: list[object] = list(trackers_raw) if isinstance(trackers_raw, (list, tuple, set)) else []
+    requested = bool(getattr(meta, "usenet", False)) or "USENET" in {_tracker_key(str(tracker)) for tracker in trackers if isinstance(tracker, str)}
     if not requested:
         return None
     posted = bool(getattr(meta, "nzb_path", None))
@@ -309,7 +318,7 @@ def _tracker_rows(meta: Any, tracker_class_map: Mapping[str, Any], state: _ItemS
                 "status": resolved,
                 "message": message_text,
                 "link": link,
-                "torrent_id": _text(torrent_id, 64, markup=False) if resolved == "success" else "",
+                "torrent_id": _text(torrent_id, 64, markup=False, public_ids=(torrent_id,)) if resolved == "success" else "",
                 "duration": round(float(duration), 2) if isinstance(duration, (int, float)) and duration > 0 else None,
                 "dupes": state.dupes.get(tracker) if state else None,
                 "slot": state.slots.get(tracker) if state else None,
@@ -388,7 +397,7 @@ def build_item_record(meta: Any, tracker_class_map: Mapping[str, Any], *, outcom
         "episode": _text(getattr(meta, "episode", ""), 20, markup=False),
         "size": max(0, _positive_int(getattr(meta, "source_size", 0))),
         "fingerprint": str(getattr(meta, "release_fingerprint", "") or "") or content_fingerprint(path),
-        "infohash": _text(getattr(meta, "infohash", ""), 64, markup=False).lower(),
+        "infohash": _text(getattr(meta, "infohash", ""), 64, markup=False, public_ids=(getattr(meta, "infohash", ""),)).lower(),
         "outcome": outcome,
         "reason": _text(reason, 60),
         "duration_ms": duration_ms,
@@ -580,8 +589,8 @@ def _read_memory(fingerprint: str, state_dir: str | Path | None = None) -> dict[
     answers = _loads(row[2])
     return {
         "category": str(row[0] or ""),
-        "ids": {str(key): str(value) for key, value in ids.items() if value} if isinstance(ids, dict) else {},
-        "answers": answers if isinstance(answers, dict) else {},
+        "ids": {str(key): str(value) for key, value in ids.items() if value} if _is_str_dict(ids) else {},
+        "answers": answers if _is_str_dict(answers) else {},
     }
 
 
@@ -714,7 +723,7 @@ def _trusted_ids(meta: Any) -> dict[str, str] | None:
     for example by a tracker check, is only trusted once an upload used it.
     """
     statuses = getattr(meta, "tracker_status", {})
-    if isinstance(statuses, Mapping) and any(isinstance(status, Mapping) and status.get("upload_success") is True for status in cast(Mapping[str, Any], statuses).values()):
+    if isinstance(statuses, Mapping) and any(_is_str_dict(status) and status.get("upload_success") is True for status in cast(Mapping[str, Any], statuses).values()):
         return external_ids(meta)
     if getattr(meta, "ids_confirmed", False) is True:
         return dict(getattr(meta, "confirmed_ids", {}) or {})
@@ -763,6 +772,10 @@ async def record_item_async(meta: Any, tracker_class_map: Mapping[str, Any], *, 
     """
     global _item
     try:
+        from src.artwork import remember_cover_frame
+
+        # A cover frame picked in the Web UI was saved by the server process, not on this meta.
+        remember_cover_frame(meta)
         await asyncio.to_thread(remember_release, meta)
     except Exception as exc:
         logger.debug(f"Release IDs and answers were not saved: {exc}")
@@ -1024,7 +1037,7 @@ def list_items(
     # Outcome counts ignore the outcome filter itself, so every chip keeps its number.
     base_where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     page_clauses = [*clauses, "outcome = ?"] if outcome else clauses
-    page_parameters = [*parameters, outcome] if outcome else parameters
+    page_parameters: list[object] = [*parameters, outcome] if outcome else parameters
     page_where = f"WHERE {' AND '.join(page_clauses)}" if page_clauses else ""
     with closing(connect_app_db(path)) as db:
         for row_outcome, count in db.execute(f"SELECT outcome, COUNT(*) FROM history_items {base_where} GROUP BY outcome", parameters):  # noqa: S608
@@ -1253,7 +1266,7 @@ def export_csv(items: list[dict[str, Any]]) -> str:
     writer = csv.writer(buffer, lineterminator="\n")
     writer.writerow(EXPORT_CSV_COLUMNS)
     for item in items:
-        flattened = {
+        flattened: dict[str, Any] = {
             **item,
             "ids": "; ".join(f"{provider}={value}" for provider, value in item["ids"].items()),
             "trackers": "; ".join(f"{tracker['tracker']}={tracker['status']}" for tracker in item["trackers"]),

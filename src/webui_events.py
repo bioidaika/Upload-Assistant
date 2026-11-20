@@ -28,7 +28,10 @@ from collections.abc import Callable, Generator, Iterable, Mapping
 from datetime import date, datetime
 from pathlib import Path
 from threading import Lock
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, TypeIs, cast
+
+if TYPE_CHECKING:
+    from src.meta import Meta
 
 GUI_EVENT_STDOUT_PREFIX = "UA_GUI_EVENT_JSON:"
 GUI_EVENTS_ENV = "UA_WEBUI_GUI_EVENTS"
@@ -58,6 +61,12 @@ type TrackerStatus = Literal["pending", "success", "failed", "skipped", "dupe", 
 
 _stdout_lock = Lock()
 _prompt_ids = itertools.count(1)
+
+
+def _is_obj_tuple(val: object) -> TypeIs[tuple[object, ...]]:
+    return isinstance(val, tuple)
+
+
 _current_item: dict[str, Any] | None = None
 _active_stage: str | None = None
 # Stages started for the current item, so the final tracker summary knows whether uploading ran.
@@ -120,8 +129,11 @@ def event_prefix(nonce: str) -> str:
     return f"{GUI_EVENT_STDOUT_PREFIX}{nonce}:"
 
 
-def plain_text(value: Any, limit: int = MAX_TEXT_LENGTH, *, markup: bool = True) -> str:
-    """Return redacted, markup-free text that is safe to show as plain text."""
+def plain_text(value: Any, limit: int = MAX_TEXT_LENGTH, *, markup: bool = True, public_ids: Iterable[object] = ()) -> str:
+    """Return redacted, markup-free text that is safe to show as plain text.
+
+    ``public_ids`` are hash-like identifiers that stay visible, such as the torrent ID in a link.
+    """
     text = _ANSI_ESCAPE.sub("", str(value if value is not None else ""))
     if markup:
         try:
@@ -133,15 +145,15 @@ def plain_text(value: Any, limit: int = MAX_TEXT_LENGTH, *, markup: bool = True)
     try:
         from src.cogs.redaction import Redaction
 
-        text = str(Redaction.redact_value(text))
+        text = str(Redaction.redact_value(text, public_ids=public_ids))
     except Exception:
         return ""
     text = text.strip()
     return text if len(text) <= limit else f"{text[: limit - 1]}…"
 
 
-def _http_link(value: Any) -> str:
-    link = plain_text(value, 2000)
+def _http_link(value: Any, public_ids: Iterable[object] = ()) -> str:
+    link = plain_text(value, 2000, public_ids=public_ids)
     return link if link.lower().startswith(("http://", "https://")) else ""
 
 
@@ -173,7 +185,7 @@ def begin_item(path: str, index: int, total: int) -> None:
     _emit("item", _current_item)
 
 
-def _item_artwork(meta: Mapping[str, Any]) -> dict[str, str]:
+def _item_artwork(meta: Mapping[str, Any] | Meta) -> dict[str, str]:
     """Return the release cover as a public URL or a local image file.
 
     A local ``artwork_file`` is never shown to the browser: the server swaps
@@ -194,7 +206,7 @@ def _item_artwork(meta: Mapping[str, Any]) -> dict[str, str]:
     return {}
 
 
-def update_item(*, personal_release: bool | None = None, run_options: Mapping[str, Any] | None = None, artwork: Mapping[str, Any] | None = None) -> None:
+def update_item(*, personal_release: bool | None = None, run_options: Mapping[str, Any] | Meta | None = None, artwork: Mapping[str, Any] | Meta | None = None) -> None:
     """Publish resolved release flags, bounded run settings and the release cover."""
     global _current_item
     if not enabled() or _current_item is None:
@@ -521,7 +533,7 @@ def _context_payload() -> dict[str, Any] | None:
             items = cast(list[Any], value)[:MAX_LIST_ITEMS]
             payload[name] = [
                 [plain_text(part, 300, markup=False) for part in item]
-                if isinstance(item, tuple)
+                if _is_obj_tuple(item)
                 # Option details are already plain and bounded by numbered_options.
                 else dict(cast(Mapping[str, Any], item))
                 if isinstance(item, Mapping)
@@ -575,7 +587,8 @@ def _release_entries(entries: Iterable[Mapping[str, Any] | str], source_size: in
     seen_links: set[str] = set()
     for entry in entries:
         if isinstance(entry, Mapping):
-            link = _http_link(entry.get("link"))
+            # The site's own ID for the release may be a hash that appears in its link.
+            link = _http_link(entry.get("link"), public_ids=(entry.get("id"),))
             if link and link in seen_links:
                 continue
             if link:
@@ -665,11 +678,12 @@ def tracker_result(
     if not _wants_details() or status not in TRACKER_STATUSES:
         return
     payload: dict[str, Any] = {"tracker": plain_text(tracker, 64), "status": status}
-    url = _http_link(link)
+    # Some sites use a hash as the torrent ID (an info hash or a release GUID); it is public.
+    url = _http_link(link, public_ids=(torrent_id,))
     if url:
         payload["link"] = url
     if torrent_id not in (None, ""):
-        payload["torrent_id"] = plain_text(torrent_id, 64)
+        payload["torrent_id"] = plain_text(torrent_id, 64, public_ids=(torrent_id,))
     text = plain_text(message) if message else ""
     if text:
         payload["message"] = text

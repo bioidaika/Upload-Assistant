@@ -9,6 +9,7 @@ from src.trackers.naming import BLU_NAME_RULES, TMDB_HOMONYM_MAX_PAGES, VideoNam
 from src.trackers.UNIT3D.blutopia import Blutopia
 from src.trackers.UNIT3D.lst import LST
 from src.trackers.UNIT3D.oldtoonsworld import OldToonsWorld
+from src.trackers.UNIT3D.skipthecommercials import SkipTheCommercials
 from src.trackers.UNIT3D.ulcx import ULCX
 
 
@@ -218,7 +219,11 @@ def test_lst_formats_dvdrip_and_drops_disc_editions() -> None:
 
 
 def test_lst_appends_trump_marker() -> None:
-    assert _tracker_name(LST, _meta(trump_reason="exact_match")) == "Synthetic Feature 2024 1080p AMZN WEB-DL DD+ 5.1 H.264-TESTGROUP - TRUMP"
+    plan = {"tracker": "LST", "reported_id": "7", "reported_name": "Older release", "reason": "exact_match"}
+    assert _tracker_name(LST, _meta(trump_plans={"LST": plan})) == "Synthetic Feature 2024 1080p AMZN WEB-DL DD+ 5.1 H.264-TESTGROUP - TRUMP"
+    # Only LST's own exact-files trump renames the LST upload.
+    assert _tracker_name(LST, _meta(trump_plans={"AITHER": {**plan, "tracker": "AITHER"}})) == "Synthetic Feature 2024 1080p AMZN WEB-DL DD+ 5.1 H.264-TESTGROUP"
+    assert _tracker_name(LST, _meta(trump_plans={"LST": {**plan, "reason": "slot_rules"}})) == "Synthetic Feature 2024 1080p AMZN WEB-DL DD+ 5.1 H.264-TESTGROUP"
 
 
 @pytest.mark.parametrize(
@@ -264,6 +269,51 @@ def test_lst_appends_trump_marker() -> None:
 )
 def test_oldtoons_follows_its_guide(meta: Meta, expected: str) -> None:
     assert _tracker_name(OldToonsWorld, meta) == expected
+
+
+@pytest.mark.parametrize(
+    ("meta", "expected"),
+    [
+        (
+            _meta(
+                category="TV",
+                title="Synthetic Show",
+                season="S01",
+                episode="",
+                search_year="",
+                service="NF",
+                aka="AKA Serie Sintetica",
+                audio_languages=["French"],
+                original_language="fr",
+            ),
+            "Synthetic Show AKA Serie Sintetica S01 1080p NF WEB-DL FRENCH DD+ 5.1 H.264-TESTGROUP",
+        ),
+        (
+            _meta(
+                category="TV",
+                title="Synthetic Show",
+                season="S04",
+                episode="E01",
+                search_year="",
+                type="WEBRIP",
+                audio_languages=["German"],
+                original_language="de",
+                video_encode="x265",
+            ),
+            "Synthetic Show S04E01 1080p AMZN WEBRip GERMAN DD+ 5.1 x265-TESTGROUP",
+        ),
+        (
+            _meta(type="REMUX", source="NTSC DVD", resolution="480i", video_codec="MPEG-2", audio="DTS 5.1", edition="Criterion Extended"),
+            "Synthetic Feature 2024 Extended NTSC DVD REMUX DTS 5.1-TESTGROUP",
+        ),
+        (
+            _meta(type="ENCODE", source="BluRay", uhd="UHD", hdr="DV HDR", video_encode="x265"),
+            "Synthetic Feature 2024 1080p UHD BluRay DD+ 5.1 DV HDR x265-TESTGROUP",
+        ),
+    ],
+)
+def test_skipthecommercials_follows_its_guide(meta: Meta, expected: str) -> None:
+    assert _tracker_name(SkipTheCommercials, meta) == expected
 
 
 @pytest.mark.parametrize("edition", ["Hybrid", "hybrid Extended", "Extended HYBRID"])

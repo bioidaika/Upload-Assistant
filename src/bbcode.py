@@ -530,7 +530,7 @@ class BBCODE:
             spoiler_placeholders.append(spoilers[i])
 
         # Get Images from [img] tags, checking if they're wrapped in [url] tags
-        imagelist: list[dict[str, Any]] = []
+        imagelist: list[dict[str, str]] = []
 
         # First, find images wrapped in URL tags: [url=web_url][img]img_url[/img][/url]
         url_img_pattern = r"\[url=(https?://[^\]]+)\]\[img[^\]]*\](.*?)\[/img\]\[/url\]"
@@ -781,6 +781,36 @@ class BBCODE:
         Removes [sub] tags
         """
         return desc.replace("[sub]", "").replace("[/sub]", "")
+
+    def convert_for_gazelle_parser(self, desc: str, *, supports_hr: bool = False) -> str:
+        """Rewrite tags that the Gazelle BBCode parser shows as raw text (checked with docs/bbcode-benchmark.txt)."""
+        if not supports_hr:
+            desc = re.sub(r"\[/?hr\]", "", desc, flags=re.IGNORECASE)
+        desc = self.remove_img_resize(desc)
+        # [code] is an inline element that collapses spaces, so MediaInfo-like columns need [pre].
+        desc = self.convert_code_to_pre(desc)
+        desc = re.sub(r"\[(/?)strike\]", r"[\1s]", desc, flags=re.IGNORECASE)
+        desc = re.sub(r'\[url="([^"\]]+)"\]', r"[url=\1]", desc, flags=re.IGNORECASE)
+        desc = re.sub(
+            r"\[color=#([0-9a-f])([0-9a-f])([0-9a-f])\]",
+            lambda m: "[color=#" + "".join(c * 2 for c in m.groups()).lower() + "]",
+            desc,
+            flags=re.IGNORECASE,
+        )
+        desc = re.sub(r"\[th\](.*?)\[/th\]", r"[td][b]\1[/b][/td]", desc, flags=re.IGNORECASE | re.DOTALL)
+        desc = re.sub(r"\[li\]", "[*]", desc, flags=re.IGNORECASE)
+        desc = re.sub(r"\[align=justify\](.*?)\[/align\]", r"\1", desc, flags=re.IGNORECASE | re.DOTALL)
+        return re.sub(r"\[/?(?:list(?:=[^\]]*)?|font(?:=[^\]]*)?|ul|ol|li|indent|note|sup|sub)\]", "", desc, flags=re.IGNORECASE)
+
+    def convert_videos_to_youtube_ids(self, desc: str) -> str:
+        """Embed YouTube links as [youtube]id and link any other [video] URL, for parsers that only embed ids."""
+        desc = re.sub(
+            r"\[(youtube|video)\]\s*https?://(?:www\.|m\.)?(?:youtube\.com/watch\?v=|youtu\.be/)([\w-]{11})[^\[]*\[/\1\]",
+            r"[youtube]\2[/youtube]",
+            desc,
+            flags=re.IGNORECASE,
+        )
+        return re.sub(r"\[video\]\s*([^\[]+?)\s*\[/video\]", r"[url]\1[/url]", desc, flags=re.IGNORECASE)
 
     def remove_list(self, desc: str) -> str:
         """

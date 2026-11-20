@@ -339,6 +339,7 @@ uv tool install --force git+https://github.com/bioidaika/Upload-Assistant.git
 | <img src="web_ui/static/img/trackers/flood.png" width="16" height="16" />                     | Flood                  | FLOOD                  | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/funfile.png" width="16" height="16" />                   | FunFile                | FUNFILE                | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/greatposterwall.png" alt="" width="16" height="16" />    | Great Poster Wall      | GREATPOSTERWALL        | MOVIE                        |
+| <img src="web_ui/static/img/trackers/happyfappy.png" width="16" height="16" />                | HappyFappy             | HAPPYFAPPY             | XXX                          |
 | <img src="web_ui/static/img/trackers/hawkeuno.png" width="16" height="16" />                  | hawke-uno              | HAWKEUNO               | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/hdbits.png" width="16" height="16" />                    | HDBits                 | HDBITS                 | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/hdspace.png" width="16" height="16" />                   | HD-Space               | HDSPACE                | MOVIE, TV                    |
@@ -348,6 +349,7 @@ uv tool install --force git+https://github.com/bioidaika/Upload-Assistant.git
 | <img src="web_ui/static/img/trackers/infinityhd.png" width="16" height="16" />                | InfinityHD             | INFINITYHD             | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/iptorrents.png" width="16" height="16" />                | IPTorrents             | IPTORRENTS             | MOVIE, TV, BOOK, GAME, MUSIC |
 | <img src="web_ui/static/img/trackers/itatorrents.png" width="16" height="16" />               | ItaTorrents            | ITATORRENTS            | MOVIE, TV                    |
+| <img src="web_ui/static/img/trackers/kufirc.png" width="16" height="16" />                    | Kufirc                 | KUFIRC                 | XXX                          |
 | <img src="web_ui/static/img/trackers/lajidui.png" width="16" height="16" />                   | lajidui                | LAJIDUI                | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/lemonhd.png" width="16" height="16" />                   | LemonHD                | LEMONHD                | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/lastdigitalunderground.png" width="16" height="16" />    | LastDigitalUnderground | LASTDIGITALUNDERGROUND | MOVIE, TV, BOOK              |
@@ -360,6 +362,7 @@ uv tool install --force git+https://github.com/bioidaika/Upload-Assistant.git
 | <img src="web_ui/static/img/trackers/midnightscene.png" width="16" height="16" />             | MidnightScene          | MIDNIGHTSCENE          | MOVIE, TV, GAME, MUSIC       |
 | <img src="web_ui/static/img/trackers/mteam.png" width="16" height="16" />                     | M-Team                 | MTEAM                  | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/nebulance.png" width="16" height="16" />                 | Nebulance              | NEBULANCE              | TV                           |
+| <img src="web_ui/static/img/trackers/nightbloom.png" width="16" height="16" />                | Nightbloom             | NIGHTBLOOM             | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/nordicquality.png" width="16" height="16" />             | NordicQuality          | NORDICQUALITY          | MOVIE, TV, MUSIC, BOOK, GAME |
 | <img src="web_ui/static/img/trackers/oldtoonsworld.png" width="16" height="16" />             | OldToonsWorld          | OLDTOONSWORLD          | MOVIE, TV                    |
 | <img src="web_ui/static/img/trackers/onlyencodes.png" width="16" height="16" />               | OnlyEncodes+           | ONLYENCODES            | MOVIE, TV                    |
@@ -386,6 +389,7 @@ uv tool install --force git+https://github.com/bioidaika/Upload-Assistant.git
 | <img src="web_ui/static/img/trackers/samaritano.png" width="16" height="16" />                | Samaritano             | SAMARITANO             | MOVIE, TV, BOOK, GAME        |
 | <img src="web_ui/static/img/trackers/seedpool.png" width="16" height="16" />                  | seedpool               | SEEDPOOL               | MOVIE, TV, BOOK, GAME, MUSIC |
 | <img src="web_ui/static/img/trackers/shareisland.png" width="16" height="16" />               | ShareIsland            | SHAREISLAND            | MOVIE, TV                    |
+| <img src="web_ui/static/img/trackers/simurg.png" width="16" height="16" />                    | Simurg                 | SIMURG                 | BOOK                         |
 | <img src="web_ui/static/img/trackers/skipthecommercials.png" alt="" width="16" height="16" /> | SkipTheCommerials      | SKIPTHECOMMERCIALS     | MOVIE (Documentary only), TV |
 | <img src="web_ui/static/img/trackers/speedapp.png" width="16" height="16" />                  | SpeedApp               | SPEEDAPP               | MOVIE, TV, BOOK, GAME, MUSIC |
 | <img src="web_ui/static/img/trackers/swarmazon.png" width="16" height="16" />                 | Swarmazon              | SWARMAZON              | MOVIE, TV                    |

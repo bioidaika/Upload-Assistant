@@ -7,6 +7,7 @@ import math
 import os
 import re
 import urllib.parse
+from collections.abc import Sequence
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, ClassVar, cast
@@ -15,7 +16,8 @@ from urllib.parse import ParseResult, urlsplit
 import aiofiles
 import httpx
 import langcodes
-from bs4 import BeautifulSoup, Comment, NavigableString, Tag
+from bs4 import BeautifulSoup, Comment, Tag
+from bs4.element import NavigableString
 from jinja2 import Template
 from langcodes.tag_parser import LanguageTagError
 
@@ -34,6 +36,7 @@ from src.music.analyzer import RIPPER_LOG_RE, read_rip_log
 from src.release_locks import release_image_lock
 from src.screenshot_manifest import files as manifest_files
 from src.takescreens import TakeScreensManager
+from src.temp_paths import release_temp_dir
 from src.tracker_images import get_tracker_image_collection, has_tracker_image_collection
 from src.trackers.common import Common
 from src.uploadscreens import UploadScreensManager
@@ -149,7 +152,7 @@ def _clean_description_text(value: Any) -> str:
     return text.replace(r"\"", '"').replace(r"\/", "/")
 
 
-def _book_overview_to_bbcode(value: str) -> str:
+def book_overview_to_bbcode(value: str) -> str:
     """Preserve useful HTML formatting in book synopses from any source."""
     soup = BeautifulSoup(_clean_description_text(value), "html.parser")
 
@@ -426,6 +429,13 @@ class DescriptionBuilder:
             except ValueError, TypeError:
                 return 0
 
+    @staticmethod
+    def _reviewed_group_count(meta: Meta, group: str, multi_screens: int) -> int:
+        """Frames to host for an extra disc or playlist; the review can add or remove some."""
+        from src.screenshot_review import group_target_count
+
+        return group_target_count(release_temp_dir(meta.base_dir, meta.uuid), group, multi_screens)
+
     def _get_tag_override(self, key: str, meta: Meta | None) -> Any:
         """Return a tag-specific value, preserving false and zero overrides."""
         tag_value = getattr(meta, "tag", "")
@@ -436,19 +446,22 @@ class DescriptionBuilder:
         if not tag:
             return None
 
-        default_config = self.config.get("DEFAULT", {})
+        default_config: object = self.config.get("DEFAULT", {})
         config_sources = (self.tracker_config, default_config)
         for config_source in config_sources:
             if not isinstance(config_source, dict):
                 continue
-            tag_overrides = config_source.get("tag_overrides", {})
-            if not isinstance(tag_overrides, dict):
+            cs_dict = cast(dict[str, Any], config_source)
+            raw_overrides: object = cs_dict.get("tag_overrides", {})
+            if not isinstance(raw_overrides, dict):
                 continue
-            for configured_tag, overrides in tag_overrides.items():
+            tag_overrides_dict = cast(dict[str, Any], raw_overrides)
+            for configured_tag, overrides in tag_overrides_dict.items():
                 if str(configured_tag).strip().lstrip("-").casefold() != tag or not isinstance(overrides, dict):
                     continue
-                if key in overrides and overrides[key] is not None:
-                    return overrides[key]
+                overrides_dict = cast(dict[str, Any], overrides)
+                if key in overrides_dict and overrides_dict[key] is not None:
+                    return overrides_dict[key]
 
         return None
 
@@ -530,7 +543,7 @@ class DescriptionBuilder:
         pattern = re.compile(self._block_regex(headers), re.IGNORECASE)
         keep = 0 if replacing else 1
         matches = list(pattern.finditer(text))
-        pieces = []
+        pieces: list[str] = []
         cursor = 0
         for match in matches[keep:]:
             pieces.append(text[cursor : match.start()])
@@ -723,7 +736,7 @@ class DescriptionBuilder:
         raw_tracks = mediainfo.get("media", {}).get("track", [])
         if not isinstance(raw_tracks, list):
             return ""
-        tracks = [track for track in raw_tracks if isinstance(track, dict)]
+        tracks: list[dict[str, Any]] = [cast(dict[str, Any], track) for track in cast(list[object], raw_tracks) if isinstance(track, dict)]
 
         def value(track: dict[str, Any], key: str) -> str:
             field = track.get(key, "")
@@ -736,8 +749,8 @@ class DescriptionBuilder:
                 return ""
             hours, milliseconds = divmod(milliseconds, 3_600_000)
             minutes, milliseconds = divmod(milliseconds, 60_000)
-            seconds, milliseconds = divmod(milliseconds, 1000)
-            return f"{hours:02}:{minutes:02}:{seconds:02}.{milliseconds:03}"
+            secs, milliseconds = divmod(milliseconds, 1000)
+            return f"{hours:02}:{minutes:02}:{secs:02}.{milliseconds:03}"
 
         def format_size(bytes_value: str) -> str:
             try:
@@ -777,7 +790,7 @@ class DescriptionBuilder:
             return ""
 
         filename = Path(value(general, "CompleteName") or video_file).stem
-        output = [
+        output: list[str] = [
             filename,
             "",
             "---GENERAL----",
@@ -1062,7 +1075,7 @@ class DescriptionBuilder:
         str_year = labels["year"]
 
         if overview:
-            overview = _book_overview_to_bbcode(overview)
+            overview = book_overview_to_bbcode(overview)
 
         audible_url = ""
         if asin:
@@ -1146,12 +1159,12 @@ class DescriptionBuilder:
                 final_book_parts.append(f"{header}{str_overview}{header_end}\n{overview}")
 
             return "\n\n".join(part for part in final_book_parts if part.strip())
-        book_parts = []
+        book_parts: list[str] = []
         prefix = f"{bullet} " if bullet else ""
         for label, val in fields:
             book_parts.append(f"{prefix}[b]{label}:[/b] {val}")
 
-        final_book_parts = []
+        final_book_parts: list[str] = []
         if underline:
             header = "[b][u]"
             header_end = "[/u][/b]\n"
@@ -1372,7 +1385,7 @@ class DescriptionBuilder:
                 game_parts.append("\n".join(table_lines))
             else:
                 # Simple BBCode format without table
-                simple_lines = []
+                simple_lines: list[str] = []
                 if clean_min:
                     simple_lines.append(f"[b]{col_min_header}[/b] {clean_min}")
                 if clean_rec:
@@ -1389,7 +1402,7 @@ class DescriptionBuilder:
                 return support_labels.get(cleaned_support.casefold(), cleaned_support)
 
             if table:
-                table_rows = []
+                table_rows: list[str] = []
                 table_rows.append(f"[tr][td][b]{str_language}[/b][/td][td][b]{str_support}[/b][/td][/tr]")
 
                 for lang, support in sorted(languages.items()):
@@ -1403,7 +1416,7 @@ class DescriptionBuilder:
                 game_parts.append(spoiler_str)
             else:
                 # Simple BBCode format without table
-                simple_lang_lines = []
+                simple_lang_lines: list[str] = []
                 for lang, support in sorted(languages.items()):
                     support_str = ", ".join(localized_support(value) for value in support)
                     simple_lang_lines.append(f"[b]{lang}[/b]: {support_str}")
@@ -1423,17 +1436,18 @@ class DescriptionBuilder:
                 return None
             return number if number > 0 else None
 
-        ordered = []
+        ordered: list[tuple[int, int | None, str, int, str, Any]] = []
         for index, track in enumerate(tracks):
             if not isinstance(track, dict):
                 continue
-            relative_path = str(track.get("relative_path") or "")
-            title = str(track.get("title") or "").strip() or Path(relative_path.replace("\\", "/")).stem
+            track_dict = cast(dict[str, Any], track)
+            relative_path = str(track_dict.get("relative_path") or "")
+            title = str(track_dict.get("title") or "").strip() or Path(relative_path.replace("\\", "/")).stem
             if not title:
                 continue
-            disc = positive_number(track.get("disc_number")) or 1
-            number = positive_number(track.get("track_number"))
-            ordered.append((disc, number, relative_path.casefold(), index, title, track.get("duration")))
+            disc = positive_number(track_dict.get("disc_number")) or 1
+            number = positive_number(track_dict.get("track_number"))
+            ordered.append((disc, number, relative_path.casefold(), index, title, track_dict.get("duration")))
 
         if not ordered:
             return ""
@@ -1474,12 +1488,13 @@ class DescriptionBuilder:
     def _build_music_rip_logs(release: dict[str, Any], labels: dict[str, Any]) -> str:
         """Render each CD rip log (EAC, XLD, ...) inside its own spoiler and code block."""
         auxiliary = release.get("auxiliary")
-        logs = auxiliary.get("logs") if isinstance(auxiliary, dict) else None
+        aux_dict = cast(dict[str, Any], auxiliary) if isinstance(auxiliary, dict) else None
+        logs: object = aux_dict.get("logs") if aux_dict is not None else None
         root_value = str(release.get("root") or "")
         if not isinstance(logs, list) or not root_value:
             return ""
         root = Path(root_value).resolve()
-        blocks = []
+        blocks: list[str] = []
         for relative in cast(list[Any], logs):
             log_path = (root / str(relative)).resolve()
             try:
@@ -1518,15 +1533,10 @@ class DescriptionBuilder:
             table = False
 
         release = meta.music_release
-        fields_data = release.get("fields", {})
-        tracks = release.get("tracks", [])
-        external_ids = release.get("external_ids", {})
-        if not isinstance(fields_data, dict):
-            fields_data = {}
-        if not isinstance(tracks, list):
-            tracks = []
-        if not isinstance(external_ids, dict):
-            external_ids = {}
+        fields_data: dict[str, Any] = release.get("fields", {}) if isinstance(release.get("fields"), dict) else {}
+        raw_tracks: object = release.get("tracks", [])
+        tracks: list[dict[str, Any]] = [cast(dict[str, Any], t) for t in cast(list[object], raw_tracks) if isinstance(t, dict)] if isinstance(raw_tracks, list) else []
+        external_ids: dict[str, Any] = release.get("external_ids", {}) if isinstance(release.get("external_ids"), dict) else {}
         if not fields_data and not tracks and not external_ids:
             return ""
 
@@ -1536,23 +1546,25 @@ class DescriptionBuilder:
 
         def value(name: str, fallback: Any = "") -> Any:
             """Return a populated normalized release field or its fallback."""
-            item = fields_data.get(name, {})
-            if isinstance(item, dict) and item.get("value") not in (None, "", [], {}):
-                return item["value"]
+            item: object = fields_data.get(name, {})
+            if isinstance(item, dict):
+                item_dict = cast(dict[str, Any], item)
+                val: object = item_dict.get("value")
+                if val not in (None, "", [], {}):
+                    return val
             return fallback
 
         def display(item: Any) -> str:
             """Format a release field for human-readable BBCode output."""
             if isinstance(item, list):
-                return ", ".join(str(part) for part in item if str(part).strip())
+                parts_list = cast(list[object], item)
+                return ", ".join(str(part) for part in parts_list if str(part).strip())
             return str(item).strip() if item not in (None, "") else ""
 
         def technical_values(name: str, formatter: Any = str) -> str:
             """Format unique valid technical values from the release tracks."""
             formatted_values: dict[Any, str] = {}
             for track in tracks:
-                if not isinstance(track, dict):
-                    continue
                 item = track.get(name)
                 if item in (None, ""):
                     continue
@@ -1569,8 +1581,6 @@ class DescriptionBuilder:
             """Return the release's average bitrate, weighted by track duration when every track has one."""
             samples: list[tuple[float, float]] = []
             for track in tracks:
-                if not isinstance(track, dict):
-                    continue
                 try:
                     bitrate = float(track.get("bitrate") or 0)
                 except TypeError, ValueError, OverflowError:
@@ -1590,7 +1600,7 @@ class DescriptionBuilder:
                 average = sum(bitrate for bitrate, _ in samples) / len(samples)
             return f"{round(average / 1000)} kbps"
 
-        text = {
+        text: dict[str, Any] = {
             "details": "Music Details" if not use_pt_br else "Detalhes da Música",
             "artist": "Artist" if not use_pt_br else "Artista",
             "album": "Album" if not use_pt_br else "Álbum",
@@ -1615,7 +1625,7 @@ class DescriptionBuilder:
             "external_ids": "External IDs" if not use_pt_br else "IDs Externos",
         }
         text.update(get_labels(MUSIC_LABELS, self.language))
-        external_id_labels = text["external_id_labels"]
+        external_id_labels = cast(dict[str, str], text["external_id_labels"])
 
         def musicbrainz_link(kind: str, identifier: Any) -> str:
             """Return a safe MusicBrainz BBCode link for a canonical UUID."""
@@ -1734,6 +1744,7 @@ class DescriptionBuilder:
         custom_header: bool = True,
         custom_signature: bool = True,
         description: bool = True,
+        disc_bdinfo: bool = True,  # BDInfo spoilers of later discs in a multi-disc pack
         game: bool = True,
         languages: bool = True,
         logo: bool = True,
@@ -1743,13 +1754,13 @@ class DescriptionBuilder:
         screenshots: bool = True,
         tonemapped_header: bool = True,
         tv_info: bool = True,
-        ua_signature: bool = True,  # ci: ua_signature v4.9
+        ua_signature: bool = True,  # ci: ua_signature v5.1
         user_description: bool = True,
         music: bool = True,
         xxx: bool = True,
         dynamic_hdr_plot: bool = True,
-        approved_image_hosts: list[str] | None = None,
-        signature: str = "",  # ci: ua_signature v4.9
+        approved_image_hosts: Sequence[str] | None = None,
+        signature: str = "",  # ci: ua_signature v5.1
         desc_header: str = "",
     ) -> str:
         apply_saved_draft(meta)
@@ -1758,8 +1769,7 @@ class DescriptionBuilder:
 
         if image_list is None:
             image_list = []
-        if approved_image_hosts is None:
-            approved_image_hosts = []
+        approved_hosts = list(approved_image_hosts or [])
         # get_tracker_image_collection falls back to meta.image_list, so only a real override
         # replaces the base screenshots. It never disables per-file pack screenshots: those
         # upload through allowed_hosts, so a tracker's host policy is honoured either way.
@@ -2001,7 +2011,7 @@ class DescriptionBuilder:
         audio_spectrogram_section = await self.get_audio_spectrogram_section(meta) if audio_spectrogram else ""
         dynamic_hdr_plot_section = await self.get_dynamic_hdr_plot_section(meta) if dynamic_hdr_plot else ""
 
-        discs_and_screenshots = await self._handle_discs_and_screenshots(meta, approved_image_hosts, images, multi_screens) if screenshots else ""
+        discs_and_screenshots = await self._handle_discs_and_screenshots(meta, approved_hosts, images, multi_screens, disc_bdinfo=disc_bdinfo) if screenshots else ""
         if self._get_bool_config("hide_screenshot_header_if_only_section", True, meta):
             image_sections = [
                 (menu_section, await self.menu_screenshot_header(meta) if menu_section else ""),
@@ -2047,14 +2057,14 @@ class DescriptionBuilder:
                 await description_file.write(self.tracker_specific_formats(self.tracker, "\n".join(part for part in (description_str, ((signature or (f"[right][url=https://github.com/wastaken7/Upload-Assistant][size=4]{meta.ua_signature}[/size][/url][/right]" if meta.ua_signature else "")) if ua_signature else "")) if part.strip())))  # fmt: off
 
         # fmt: off
-        return self.tracker_specific_formats(self.tracker, "\n".join(part for part in (description_str, ((signature or (f"[right][url=https://github.com/wastaken7/Upload-Assistant][size=4]{meta.ua_signature}[/size][/url][/right]" if meta.ua_signature else "")) if ua_signature else "")) if part.strip()))  # ci: ua_signature v4.9
+        return self.tracker_specific_formats(self.tracker, "\n".join(part for part in (description_str, ((signature or (f"[right][url=https://github.com/wastaken7/Upload-Assistant][size=4]{meta.ua_signature}[/size][/url][/right]" if meta.ua_signature else "")) if ua_signature else "")) if part.strip()))  # ci: ua_signature v5.1
         # fmt: on
 
     async def _check_saved_pack_image_links(self, meta: Meta, approved_image_hosts: list[str]) -> dict[str, Any]:
         pack_images_file = Path(meta.base_dir) / "tmp" / meta.uuid / "pack_image_links.json"
         pack_images_data: dict[str, Any] = {}
         approved_hosts = set(approved_image_hosts or [])
-        if await self.common.path_exists(pack_images_file):
+        if await self.common.path_exists(str(pack_images_file)):
             try:
                 async with aiofiles.open(pack_images_file, encoding="utf-8") as f:
                     pack_images_data = json.loads(await f.read())
@@ -2127,7 +2137,11 @@ class DescriptionBuilder:
             ]
         return []
 
-    def _append_disc_mediainfo(self, desc_parts: list[str], disc: dict[str, Any]) -> None:
+    def _append_disc_mediainfo(self, desc_parts: list[str], disc: dict[str, Any], bdinfo: bool = True) -> None:
+        if disc["type"] == "BDMV" and not bdinfo:
+            # The tracker carries this disc's BDInfo in its own field; the name still labels the screenshots.
+            desc_parts.append(f"{disc.get('name', 'BDINFO')}\n\n")
+            return
         blocks = self.disc_mediainfo_blocks(disc)
         if not blocks:
             return
@@ -2142,11 +2156,12 @@ class DescriptionBuilder:
         images: list[dict[str, str]],
         multi_screens: int,
         include_header: bool = True,
+        disc_bdinfo: bool = True,
     ) -> str:
         # Trackers upload concurrently, but each pack file's images are created
         # once: later trackers wait here and reuse them.
         async with release_image_lock(meta):
-            return await self._render_discs_and_screenshots(meta, approved_image_hosts, images, multi_screens, include_header)
+            return await self._render_discs_and_screenshots(meta, approved_image_hosts, images, multi_screens, include_header, disc_bdinfo)
 
     async def _render_discs_and_screenshots(
         self,
@@ -2155,6 +2170,7 @@ class DescriptionBuilder:
         images: list[dict[str, str]],
         multi_screens: int,
         include_header: bool = True,
+        disc_bdinfo: bool = True,
     ) -> str:
         if not images:
             return ""
@@ -2264,7 +2280,7 @@ class DescriptionBuilder:
                                     multi_screens,
                                     1,
                                     0,
-                                    multi_screens,
+                                    self._reviewed_group_count(meta, f"PLAYLIST_{i}", multi_screens),
                                     new_screens,
                                     {new_images_key: meta[new_images_key]},
                                     allowed_hosts=approved_image_hosts,
@@ -2355,7 +2371,7 @@ class DescriptionBuilder:
                         if meta.get(new_images_key):
                             logger.debug(f"[yellow]Found needed image URLs for {new_images_key}")
                             desc_parts.append("[center]")
-                            self._append_disc_mediainfo(desc_parts, each)
+                            self._append_disc_mediainfo(desc_parts, each, disc_bdinfo)
                             desc_parts.append("[/center]\n\n")
                             # Use existing URLs from meta to write to descfile
                             desc_parts.append("[center]")
@@ -2371,7 +2387,7 @@ class DescriptionBuilder:
                             meta.retry_count += 1
                             meta[new_images_key] = []
                             desc_parts.append("[center]")
-                            self._append_disc_mediainfo(desc_parts, each)
+                            self._append_disc_mediainfo(desc_parts, each, disc_bdinfo)
                             desc_parts.append("[/center]\n\n")
                             # Check if new screenshots already exist before running prep.screenshots
                             new_screens = [f.name for f in manifest_files(meta.base_dir, meta.uuid, f"FILE_{i}")]
@@ -2384,7 +2400,7 @@ class DescriptionBuilder:
                                     multi_screens,
                                     1,
                                     0,
-                                    multi_screens,
+                                    self._reviewed_group_count(meta, f"FILE_{i}", multi_screens),
                                     new_screens,
                                     {new_images_key: meta[new_images_key]},
                                     allowed_hosts=approved_image_hosts,
@@ -2463,6 +2479,9 @@ class DescriptionBuilder:
         char_count = 0
         max_char_limit = char_limit  # Character limit
         other_files_spoiler_open = False  # Track if "Other files" spoiler has been opened
+        # pack_mediainfo keeps each file's name and MediaInfo when multiScreens is 0, so only
+        # the first file gets screenshots. --sorted-filelist packs are not ordered episodes.
+        list_pack_files = multi_screens != 0 or (not meta.sorted_filelist and self._get_bool_config("pack_mediainfo", False, meta))
         total_files_to_process = min(len(filelist), process_limit)
         processed_count = 0
         if multi_screens != 0 and total_files_to_process > 1:
@@ -2571,13 +2590,13 @@ class DescriptionBuilder:
                 filename = Path(file.strip()).stem.replace("[", "").replace("]", "")
 
                 # If we are beyond the file limit, add all further files in a spoiler
-                if multi_screens != 0 and i >= file_limit and not other_files_spoiler_open:
+                if list_pack_files and i >= file_limit and not other_files_spoiler_open:
                     desc_parts.append("[center][spoiler=Other files]\n")
                     char_count += len("[center][spoiler=Other files]\n")
                     other_files_spoiler_open = True
 
                 # Write filename in BBCode format with MediaInfo in spoiler if not the first file
-                if multi_screens != 0:
+                if list_pack_files:
                     if i > 0 and char_count < max_char_limit:
                         mi_dump = await _pack_file_mediainfo(file)
                         parsed_mediainfo = self.parser.parse_mediainfo(mi_dump)
@@ -2666,10 +2685,10 @@ class DescriptionBuilder:
                     for img_index, image in enumerate(menu_images):
                         web_url = image.get("web_url")
                         raw_url = image.get("raw_url")
-                        img_url = image.get("img_url", raw_url)
+                        img_url = str(image.get("img_url") or raw_url)
                         if not web_url or not raw_url:
                             continue
-                        menu_parts.append(self.format_screenshot(web_url, raw_url, img_url, meta=meta))
+                        menu_parts.append(self.format_screenshot(str(web_url), str(raw_url), img_url, meta=meta))
                         self._append_screenshot_row_separator(menu_parts, img_index, screens_per_row)
                     menu_parts.append("[/center]\n\n")
                     menu_image_section = "".join(menu_parts)
@@ -2688,6 +2707,9 @@ class DescriptionBuilder:
 
         if get_tracker_framework(self.tracker) == "NEXUSPHP":
             return f"[img]{raw_url}[/img]"
+        if get_tracker_framework(self.tracker) == "LUMINANCE":
+            # Contact sheets must show as direct images, not as links to a gallery page.
+            return f"[img]{raw_url}[/img]\n"
         if self.tracker == "HDTORRENTS":
             return f"<a href='{raw_url}'><img src='{img_url}' height=137></a> "
         if self.tracker == "TORRENTLEECH":
@@ -2706,10 +2728,9 @@ class DescriptionBuilder:
         bbcode = BBCODE()
         from src.trackersetup import get_tracker_framework
 
+        comparisons: list[str] = []
         if get_tracker_framework(tracker) == "UNIT3D":
             # Protect comparison payloads from all formatting, including newline cleanup.
-            comparisons: list[str] = []
-
             def preserve_comparison(match: re.Match[str]) -> str:
                 comparisons.append(match.group(0))
                 return f"\x00COMPARISON{len(comparisons) - 1}\x00"
@@ -2737,17 +2758,30 @@ class DescriptionBuilder:
             description = bbcode.convert_named_colors(description)
             description = bbcode.convert_headings_to_sizes(description)
 
+        if tracker in {"BJSHARE", "BRASILTRACKER"}:
+            description = bbcode.convert_comparison_to_centered(description, 1000)
+            description = bbcode.convert_for_gazelle_parser(description)
+
         if tracker == "BRASILTRACKER":
-            description = bbcode.remove_img_resize(description)
-            description = bbcode.remove_list(description)
+            description = re.sub(r"\[(/?)(?:collapse|expand)(=[^\]]*)?\]", r"[\1spoiler\2]", description, flags=re.IGNORECASE)
+            # Only video ids embed correctly; a full URL is autolinked inside the player markup.
+            description = bbcode.convert_videos_to_youtube_ids(description)
+            description = re.sub(r"\[align=(center|right|left)\](.*?)\[/align\]", r"[\1]\2[/\1]", description, flags=re.IGNORECASE | re.DOTALL)
 
         if tracker == "BJSHARE":
+            # [spoiler] only blacks out text and drops its title; [hide] is the collapsible block.
             description = bbcode.convert_named_spoiler_to_named_hide(description)
             description = bbcode.convert_spoiler_to_hide(description)
-            description = bbcode.remove_img_resize(description)
+            description = re.sub(r"\[(/?)(?:collapse|expand)(=[^\]]*)?\]", r"[\1hide\2]", description, flags=re.IGNORECASE)
+            # Embeds need the full URL; a bare id is shown as text.
+            description = re.sub(r"\[youtube\]\s*([\w-]{11})\s*\[/youtube\]", r"[youtube]https://www.youtube.com/watch?v=\1[/youtube]", description, flags=re.IGNORECASE)
+            description = re.sub(
+                r"\[video\]\s*(?!https?://(?:www\.|m\.)?(?:youtube\.com|youtu\.be)/)([^\[]+?)\s*\[/video\]", r"[url]\1[/url]", description, flags=re.IGNORECASE
+            )
+            # Only [center] and [align=center|right] are supported; left is the default alignment.
             description = bbcode.convert_to_align(description)
-            description = bbcode.remove_list(description)
-            description = description.replace("[code]", "[pre]").replace("[/code]", "[/pre]")
+            description = re.sub(r"\[align=left\](.*?)\[/align\]", r"\1", description, flags=re.IGNORECASE | re.DOTALL)
+            description = re.sub(r"\[(/?)mediainfo\]", r"[\1pre]", description, flags=re.IGNORECASE)
 
         if tracker == "ANTHELION":
             description = bbcode.convert_to_align(description)
@@ -2759,24 +2793,21 @@ class DescriptionBuilder:
             description = description.replace("[code]", "[pre]").replace("[/code]", "[/pre]")
 
         if tracker == "DIGITALCORE":
+            # Supported tags were checked with docs/bbcode-benchmark.txt; lists, [hr], [mediainfo] and titled spoilers render.
+            description = bbcode.convert_comparison_to_centered(description, 1000)
             description = bbcode.remove_img_resize(description)
-            description = description.replace("[user]", "").replace("[/user]", "")
-            description = description.replace("[align=left]", "").replace("[/align]", "")
-            description = description.replace("[right]", "").replace("[/right]", "")
-            description = description.replace("[align=right]", "").replace("[/align]", "")
-            description = bbcode.remove_sup(description)
-            description = bbcode.remove_sub(description)
-            description = description.replace("[alert]", "").replace("[/alert]", "")
-            description = description.replace("[note]", "").replace("[/note]", "")
-            description = description.replace("[hr]", "").replace("[/hr]", "")
-            description = description.replace("[h1]", "[u][b]").replace("[/h1]", "[/b][/u]")
-            description = description.replace("[h2]", "[u][b]").replace("[/h2]", "[/b][/u]")
-            description = description.replace("[h3]", "[u][b]").replace("[/h3]", "[/b][/u]")
-            description = description.replace("[ul]", "").replace("[/ul]", "")
-            description = description.replace("[ol]", "").replace("[/ol]", "")
-            description = description.replace("[*] ", "• ").replace("[*]", "• ")
-            description = bbcode.convert_named_spoiler_to_normal_spoiler(description)
-            description = bbcode.remove_list(description)
+            description = re.sub(r"\[(/?)(?:hide|collapse|expand)(=[^\]]*)?\]", r"[\1spoiler\2]", description, flags=re.IGNORECASE)
+            description = re.sub(r"\[(/?)strike\]", r"[\1s]", description, flags=re.IGNORECASE)
+            description = re.sub(r"\[h[1-6]\]", "[u][b]", description, flags=re.IGNORECASE)
+            description = re.sub(r"\[/h[1-6]\]", "[/b][/u]", description, flags=re.IGNORECASE)
+            # A quoted URL is shown as plain text without the link.
+            description = re.sub(r'\[url="([^"\]]+)"\]', r"[url=\1]", description, flags=re.IGNORECASE)
+            # Only [center] is supported; other alignments fall back to the default left alignment.
+            description = re.sub(r"\[align=center\](.*?)\[/align\]", r"[center]\1[/center]", description, flags=re.IGNORECASE | re.DOTALL)
+            description = re.sub(r"\[/?(?:align(?:=[^\]]*)?|right|left|indent|user|alert|note|sup|sub)\]", "", description, flags=re.IGNORECASE)
+            # Only [video] embeds, and it needs the full URL.
+            description = re.sub(r"\[youtube\]\s*([\w-]{11})\s*\[/youtube\]", r"[video]https://www.youtube.com/watch?v=\1[/video]", description, flags=re.IGNORECASE)
+            description = re.sub(r"\[youtube\]\s*(https?://[^\[]+?)\s*\[/youtube\]", r"[video]\1[/video]", description, flags=re.IGNORECASE)
             description = description.strip()
 
         if tracker == "FILEIPLAY":
@@ -2822,36 +2853,54 @@ class DescriptionBuilder:
             description = re.sub(r"\[img=(?P<width>\d+)\](?P<src>[^\[]+)\[/img\]", r'<img src="\g<src>" width="\g<width>">', description, flags=re.IGNORECASE)
 
         if tracker == "GREATPOSTERWALL":
-            description = bbcode.remove_sup(description)
-            description = bbcode.remove_sub(description)
-            description = bbcode.convert_to_align(description)
-            description = bbcode.remove_list(description)
-            description = description.replace("[code]", "[pre]").replace("[/code]", "[/pre]")
             description = re.sub(r"\[url=[^\]]+\]\[img(?:=[^\]]+)?\]([^\[]+)\[/img\]\[/url\]", r"[img]\1[/img]", description, flags=re.IGNORECASE)
+            # [comparison], [mediainfo], [hr] and titled spoilers render natively.
+            description = bbcode.convert_for_gazelle_parser(description, supports_hr=True)
+            description = re.sub(r"\[(/?)(?:collapse|expand)(=[^\]]*)?\]", r"[\1spoiler\2]", description, flags=re.IGNORECASE)
+            # Nothing embeds video, so link it instead.
+            description = re.sub(
+                r"\[(?:youtube|video)\]\s*([\w-]{11})\s*\[/(?:youtube|video)\]", r"[url]https://www.youtube.com/watch?v=\1[/url]", description, flags=re.IGNORECASE
+            )
+            description = re.sub(r"\[(?:youtube|video)\]\s*(https?://[^\[]+?)\s*\[/(?:youtube|video)\]", r"[url]\1[/url]", description, flags=re.IGNORECASE)
+            # Only [align=center|right] is supported; left is the default alignment.
+            description = bbcode.convert_to_align(description)
+            description = re.sub(r"\[align=left\](.*?)\[/align\]", r"\1", description, flags=re.IGNORECASE | re.DOTALL)
 
         if tracker == "HDSPACE":
-            description = description.replace("[user]", "").replace("[/user]", "")
-            description = description.replace("[align=left]", "").replace("[/align]", "")
-            description = description.replace("[right]", "").replace("[/right]", "")
-            description = description.replace("[align=right]", "").replace("[/align]", "")
-            description = bbcode.remove_sub(description)
-            description = bbcode.remove_sup(description)
-            description = description.replace("[alert]", "").replace("[/alert]", "")
-            description = description.replace("[note]", "").replace("[/note]", "")
-            description = description.replace("[hr]", "").replace("[/hr]", "")
-            description = description.replace("[h1]", "[u][b]").replace("[/h1]", "[/b][/u]")
-            description = description.replace("[h2]", "[u][b]").replace("[/h2]", "[/b][/u]")
-            description = description.replace("[h3]", "[u][b]").replace("[/h3]", "[/b][/u]")
-            description = description.replace("[ul]", "").replace("[/ul]", "")
-            description = description.replace("[ol]", "").replace("[/ol]", "")
-            description = bbcode.remove_hide(description)
-            description = bbcode.remove_img_resize(description)
+            # Supported tags were checked with docs/bbcode-benchmark.txt; [list], [center], [quote] and named colors render.
             description = bbcode.convert_comparison_to_centered(description, 1000)
-            description = bbcode.remove_spoiler(description)
+            description = bbcode.remove_img_resize(description)
+            # [code] uses a proportional font, so MediaInfo-like columns need [pre].
+            description = bbcode.convert_code_to_pre(description)
+            description = re.sub(r"\[(/?)mediainfo\]", r"[\1pre]", description, flags=re.IGNORECASE)
+            description = re.sub(r"\[h[1-6]\]", "[u][b]", description, flags=re.IGNORECASE)
+            description = re.sub(r"\[/h[1-6]\]", "[/b][/u]", description, flags=re.IGNORECASE)
+            # Only CSS named colors work; hex values that have no name are dropped.
             description = bbcode.convert_hex_colors_to_named(description)
+            description = re.sub(r"\[color=#[0-9a-f]{3,6}\](.*?)\[/color\]", r"\1", description, flags=re.IGNORECASE | re.DOTALL)
+            description = bbcode.clamp_size_tags(description, 7)
+            description = re.sub(r"\[align=center\](.*?)\[/align\]", r"[center]\1[/center]", description, flags=re.IGNORECASE | re.DOTALL)
+            description = re.sub(r"\[ul\]", "[list]", description, flags=re.IGNORECASE)
+            description = re.sub(r"\[ol\]", "[list=1]", description, flags=re.IGNORECASE)
+            description = re.sub(r"\[/(?:ul|ol)\]", "[/list]", description, flags=re.IGNORECASE)
+            description = re.sub(r"\[li\]", "[*]", description, flags=re.IGNORECASE)
+            # Tables are not supported, so keep one row per line.
+            description = re.sub(r"(?:\[/t[dh]\]\s*)?\[/tr\]", "\n", description, flags=re.IGNORECASE)
+            description = re.sub(r"\[/t[dh]\]\s*", " | ", description, flags=re.IGNORECASE)
+            description = re.sub(
+                r"\[(?:youtube|video)\]\s*([\w-]{11})\s*\[/(?:youtube|video)\]", r"[url]https://www.youtube.com/watch?v=\1[/url]", description, flags=re.IGNORECASE
+            )
+            description = re.sub(r"\[(?:youtube|video)\]\s*(https?://[^\[]+?)\s*\[/(?:youtube|video)\]", r"[url]\1[/url]", description, flags=re.IGNORECASE)
+            description = re.sub(
+                r"\[/?(?:align(?:=[^\]]*)?|right|left|indent|user|alert|note|hr|s|strike|sup|sub|li|font(?:=[^\]]*)?|table|tr|td|th"
+                r"|spoiler(?:=[^\]]*)?|hide(?:=[^\]]*)?|collapse(?:=[^\]]*)?|expand(?:=[^\]]*)?)\]",
+                "",
+                description,
+                flags=re.IGNORECASE,
+            )
 
             # Apply custom image line breaks for HDSPACE: if "imgbox" is not in the web_url, place only one image per line.
-            def hds_image_formatter(match) -> str:
+            def hds_image_formatter(match: re.Match[str]) -> str:
                 web_url = match.group(1)
                 raw_url = match.group(2)
                 if "imgbox" not in web_url:
@@ -2882,24 +2931,60 @@ class DescriptionBuilder:
             description = bbcode.remove_spoiler(description)
 
         if tracker == "HDTORRENTS":
-            description = description.replace("[user]", "").replace("[/user]", "")
-            description = description.replace("[align=left]", "").replace("[/align]", "")
-            description = description.replace("[align=right]", "").replace("[/align]", "")
-            description = bbcode.remove_sub(description)
-            description = bbcode.remove_sup(description)
-            description = description.replace("[alert]", "").replace("[/alert]", "")
-            description = description.replace("[note]", "").replace("[/note]", "")
-            description = description.replace("[hr]", "").replace("[/hr]", "")
-            description = description.replace("[h1]", "[u][b]").replace("[/h1]", "[/b][/u]")
-            description = description.replace("[h2]", "[u][b]").replace("[/h2]", "[/b][/u]")
-            description = description.replace("[h3]", "[u][b]").replace("[/h3]", "[/b][/u]")
-            description = description.replace("[ul]", "").replace("[/ul]", "")
-            description = description.replace("[ol]", "").replace("[/ol]", "")
-            description = bbcode.convert_spoiler_to_hide(description)
-            description = bbcode.remove_img_resize(description)
+            # Supported tags were checked with docs/bbcode-benchmark.txt.
+            # The description is cut at the first character outside the Basic Multilingual Plane (e.g. emoji).
+            description = re.sub(r"[\U00010000-\U0010FFFF]", "", description)
             description = bbcode.convert_comparison_to_centered(description, 1000)
-            description = bbcode.remove_spoiler(description)
-            description = bbcode.remove_list(description)
+            description = bbcode.remove_img_resize(description)
+            # [code] uses a proportional font, so MediaInfo-like columns need [pre].
+            description = bbcode.convert_code_to_pre(description)
+            description = re.sub(r"\[(/?)mediainfo\]", r"[\1pre]", description, flags=re.IGNORECASE)
+            # Only an untitled [hide] collapses, so keep titles as bold text above it.
+            description = re.sub(r"\[(?:spoiler|hide|collapse|expand)=([^\]]+)\]", lambda m: f"[b]{m.group(1).strip()}[/b]\n[hide]", description, flags=re.IGNORECASE)
+            description = re.sub(r"\[(/?)(?:spoiler|collapse|expand)\]", r"[\1hide]", description, flags=re.IGNORECASE)
+            description = re.sub(r"\[h[1-6]\]", "[u][b]", description, flags=re.IGNORECASE)
+            description = re.sub(r"\[/h[1-6]\]", "[/b][/u]", description, flags=re.IGNORECASE)
+            description = re.sub(
+                r"\[color=#([0-9a-f])([0-9a-f])([0-9a-f])\]",
+                lambda m: "[color=#" + "".join(c * 2 for c in m.groups()).lower() + "]",
+                description,
+                flags=re.IGNORECASE,
+            )
+            description = bbcode.clamp_size_tags(description, 7)
+            description = re.sub(r'\[url="([^"\]]+)"\]', r"[url=\1]", description, flags=re.IGNORECASE)
+            description = re.sub(r"\[align=(center|right|left)\](.*?)\[/align\]", r"[\1]\2[/\1]", description, flags=re.IGNORECASE | re.DOTALL)
+            description = re.sub(r"\[li\]", "[*]", description, flags=re.IGNORECASE)
+            # Tables are not supported, so keep one row per line.
+            description = re.sub(r"(?:\[/t[dh]\]\s*)?\[/tr\]", "\n", description, flags=re.IGNORECASE)
+            description = re.sub(r"\[/t[dh]\]\s*", " | ", description, flags=re.IGNORECASE)
+            description = re.sub(
+                r"\[(?:youtube|video)\]\s*([\w-]{11})\s*\[/(?:youtube|video)\]", r"[url]https://www.youtube.com/watch?v=\1[/url]", description, flags=re.IGNORECASE
+            )
+            description = re.sub(r"\[(?:youtube|video)\]\s*(https?://[^\[]+?)\s*\[/(?:youtube|video)\]", r"[url]\1[/url]", description, flags=re.IGNORECASE)
+            # [*] items render on their own; the list wrappers do not.
+            description = re.sub(
+                r"\[/?(?:align(?:=[^\]]*)?|list(?:=[^\]]*)?|ul|ol|li|table|tr|td|th|indent|user|alert|note|hr|s|strike|sup|sub)\]", "", description, flags=re.IGNORECASE
+            )
+
+        if tracker == "MTEAM":
+            # Supported tags were checked with docs/bbcode-benchmark.txt; MTEAM.generate_description converts the rest to Markdown.
+            description = bbcode.convert_comparison_to_centered(description, 1000)
+            description = bbcode.remove_img_resize(description)
+            description = re.sub(r'\[url="([^"\]]+)"\]', r"[url=\1]", description, flags=re.IGNORECASE)
+            description = bbcode.convert_headings_to_sizes(description)
+            description = re.sub(r"\[(/?)strike\]", r"[\1s]", description, flags=re.IGNORECASE)
+            description = re.sub(r"\[(/?)(?:pre|mediainfo)\]", r"[\1code]", description, flags=re.IGNORECASE)
+            description = re.sub(r"\[align=(center|right|left)\](.*?)\[/align\]", r"[\1]\2[/\1]", description, flags=re.IGNORECASE | re.DOTALL)
+            # No collapsible block exists, so show the content with its title in bold.
+            description = re.sub(r"\[(?:spoiler|hide|collapse|expand)=([^\]]+)\]", lambda m: f"[b]{m.group(1).strip()}[/b]\n", description, flags=re.IGNORECASE)
+            # [*] is read as Markdown emphasis; plain bullets render reliably.
+            description = re.sub(r"\[(?:\*|li)\]\s*", "• ", description, flags=re.IGNORECASE)
+            # Embeds are stripped, so link the video instead.
+            description = re.sub(
+                r"\[(?:youtube|video)\]\s*([\w-]{11})\s*\[/(?:youtube|video)\]", r"[url]https://www.youtube.com/watch?v=\1[/url]", description, flags=re.IGNORECASE
+            )
+            description = re.sub(r"\[(?:youtube|video)\]\s*(https?://[^\[]+?)\s*\[/(?:youtube|video)\]", r"[url]\1[/url]", description, flags=re.IGNORECASE)
+            description = re.sub(r"\[/?(?:align(?:=[^\]]*)?|list(?:=[^\]]*)?|ul|ol|li|indent|note|hr|spoiler|hide|collapse|expand)\]", "", description, flags=re.IGNORECASE)
 
         if get_tracker_framework(tracker) == "NEXUSPHP":
             description = description.replace("[user]", "").replace("[/user]", "")
@@ -2924,23 +3009,48 @@ class DescriptionBuilder:
             description = re.sub(r"\n{3,}", "\n\n", description)
 
         if tracker == "SPEEDAPP":
-            description = bbcode.remove_img_resize(description)
-            description = bbcode.convert_named_spoiler_to_normal_spoiler(description)
-            description = description.replace("[note]", "Note: ").replace("[/note]", "").replace("[code]", "").replace("[/code]", "").replace("[*]", "• ")
-            description = bbcode.remove_spoiler(description)
-            description = bbcode.remove_list(description)
+            # Supported tags were checked with docs/bbcode-benchmark.txt; [code], [note], lists, headings and spoilers render.
+            description = bbcode.convert_comparison_to_centered(description, 1000)
+            # [img=N] is shown as a plain link; the width attribute form works.
+            description = re.sub(r"\[img=(\d+)(?:x\d+)?\]", r"[img width=\1]", description, flags=re.IGNORECASE)
+            description = re.sub(r"\[(/?)mediainfo\]", r"[\1code]", description, flags=re.IGNORECASE)
+            description = re.sub(r"\[(/?)strike\]", r"[\1s]", description, flags=re.IGNORECASE)
+            description = re.sub(r"\[(/?)(?:hide|collapse|expand)(=[^\]]*)?\]", r"[\1spoiler\2]", description, flags=re.IGNORECASE)
+            # Spoiler titles stop at the first space, so keep a multi-word title as bold text above the spoiler.
+            description = re.sub(r"\[spoiler=([^\]]*\s[^\]]*)\]", lambda m: f"[b]{m.group(1).strip()}[/b]\n[spoiler]", description, flags=re.IGNORECASE)
+            # Tables are not supported, so keep one row per line.
+            description = re.sub(r"(?:\[/t[dh]\]\s*)?\[/tr\]", "\n", description, flags=re.IGNORECASE)
+            description = re.sub(r"\[/t[dh]\]\s*", " | ", description, flags=re.IGNORECASE)
+            description = re.sub(r"\[/?(?:table|tr|td|th|indent)\]", "", description, flags=re.IGNORECASE)
+            # Only a video id embeds.
+            description = bbcode.convert_videos_to_youtube_ids(description)
 
         if tracker == "TORRENTLEECH":
-            description = description.replace("[center]", "<center>").replace("[/center]", "</center>")
+            # Supported tags were checked with docs/bbcode-benchmark.txt. The description is shown in a monospace
+            # pre-wrap block, so code tags are not needed, and HTML such as <center> renders.
+            description = bbcode.convert_comparison_to_centered(description, 1000)
+            # [center] only becomes an inline span that does not center anything.
+            description = re.sub(r"\[align=center\](.*?)\[/align\]", r"[center]\1[/center]", description, flags=re.IGNORECASE | re.DOTALL)
+            description = re.sub(r"\[(/?)center\]", r"<\1center>", description, flags=re.IGNORECASE)
             # TorrentLeech has no heading BBCode; render headings as bold text instead.
             description = re.sub(r"\[(/?)h[1-6]\]", r"[\1b]", description, flags=re.IGNORECASE)
-            description = re.sub(r"\[\*\]", "\n[*]", description, flags=re.IGNORECASE)
+            description = re.sub(r"(?<!\n)\[\*\]", "\n[*]", description, flags=re.IGNORECASE)
             description = re.sub(r"\[c\](.*?)\[/c\]", r"[code]\1[/code]", description, flags=re.IGNORECASE | re.DOTALL)
+            # Saving drops everything after an [hr] tag.
             description = re.sub(r"\[hr\]", "---", description, flags=re.IGNORECASE)
-            description = re.sub(r'\[img=[\d"x]+\]', "[img]", description, flags=re.IGNORECASE)
+            # Any [img] attribute produces broken markup.
+            description = bbcode.remove_img_resize(description)
+            description = re.sub(r"\[quote=[^\]]*\]", "[quote]", description, flags=re.IGNORECASE)
+            description = re.sub(r"\[(/?)strike\]", r"[\1s]", description, flags=re.IGNORECASE)
+            description = re.sub(r"\[th\](.*?)\[/th\]", r"[td][b]\1[/b][/td]", description, flags=re.IGNORECASE | re.DOTALL)
+            description = bbcode.convert_videos_to_youtube_ids(description)
             description = description.replace("[*] ", "• ").replace("[*]", "• ").replace("[note]", "Note: ").replace("[/note]", "").replace("[code]", "").replace("[/code]", "")
-            description = bbcode.remove_list(description)
-            description = bbcode.convert_comparison_to_centered(description, 1000)
+            description = re.sub(
+                r"\[/?(?:list(?:=[^\]]*)?|align(?:=[^\]]*)?|right|left|indent|mediainfo|hide(?:=[^\]]*)?|collapse(?:=[^\]]*)?|expand(?:=[^\]]*)?)\]",
+                "",
+                description,
+                flags=re.IGNORECASE,
+            )
             description = bbcode.remove_spoiler(description)
             description = re.sub(r"\n{3,}", "\n\n", description)
 
@@ -2958,8 +3068,22 @@ class DescriptionBuilder:
             description = bbcode.convert_hide_to_spoiler(description)
             description = description.replace("[user]", "").replace("[/user]", "")
             description = description.replace("[hr]", "").replace("[/hr]", "")
-            description = description.replace("[ul]", "").replace("[/ul]", "")
-            description = description.replace("[ol]", "").replace("[/ol]", "")
+            # Tags below are shown as raw text by UNIT3D (checked with docs/bbcode-benchmark.txt).
+            description = re.sub(r"\[(/?)(?:collapse|expand)(=[^\]]*)?\]", r"[\1spoiler\2]", description, flags=re.IGNORECASE)
+            description = re.sub(r"\[(/?)strike\]", r"[\1s]", description, flags=re.IGNORECASE)
+            description = re.sub(r"\[(/?)mediainfo\]", r"[\1code]", description, flags=re.IGNORECASE)
+            # A quoted URL becomes a "Broken link".
+            description = re.sub(r'\[url="([^"\]]+)"\]', r"[url=\1]", description, flags=re.IGNORECASE)
+            description = re.sub(r"\[align=(center|right|left)\](.*?)\[/align\]", r"[\1]\2[/\1]", description, flags=re.IGNORECASE | re.DOTALL)
+            description = re.sub(r"\[align=justify\](.*?)\[/align\]", r"\1", description, flags=re.IGNORECASE | re.DOTALL)
+            description = re.sub(r"\[/?indent\]", "", description, flags=re.IGNORECASE)
+            description = re.sub(r"\[ul\]", "[list]", description, flags=re.IGNORECASE)
+            description = re.sub(r"\[ol\]", "[list=1]", description, flags=re.IGNORECASE)
+            description = re.sub(r"\[/(?:ul|ol)\]", "[/list]", description, flags=re.IGNORECASE)
+            description = re.sub(r"\[li\]", "[*]", description, flags=re.IGNORECASE)
+            description = re.sub(r"\[/li\]", "", description, flags=re.IGNORECASE)
+            # Only a video id embeds; a full URL is shown as a raw tag around a link.
+            description = bbcode.convert_videos_to_youtube_ids(description)
             description = bbcode.remove_extra_lines(description)
             for index, comparison in enumerate(comparisons):
                 description = description.replace(f"\x00COMPARISON{index}\x00", comparison)

@@ -934,7 +934,7 @@ const loadCsrfToken =
   (typeof window !== "undefined" && window.loadCsrfToken) || (async () => {});
 
 const sensitiveKeyPattern =
-  /(api|username|password|announce_url|rss_key|passkey|qui_proxy_url|userhash)/i;
+  /(api|username|password|announce_url|rss_key|passkey|qui_proxy_url|userhash|secret|token|client_id|login_answer|rtorrent_url|^cookies$)/i;
 const isSensitiveKey = (key) => sensitiveKeyPattern.test(key || "");
 const isTorrentClientUserPass = (key, pathParts) =>
   pathParts.includes("TORRENT_CLIENTS") && /(user|pass)/i.test(key || "");
@@ -965,6 +965,7 @@ const DISPLAY_LABEL_OVERRIDES = {
   tag_overrides: "Release Group Overrides",
   hide_screenshot_header_if_only_section: "Hide Standalone Image Header",
   multiScreens: "Multiple Screenshots",
+  pack_mediainfo: "Pack MediaInfo Without Screenshots",
   charLimit: "Character Limit",
   fileLimit: "File Limit",
   processLimit: "Process Limit",
@@ -973,6 +974,7 @@ const DISPLAY_LABEL_OVERRIDES = {
   imgbb_api: "ImgBB API Key",
   lensdump_api: "LensDump API Key",
   lostimg_api: "LostImg API Key",
+  luminapix_api: "LuminaPix API Key",
   midnightscene_api_key: "MidnightScene API Key",
   onlyimage_api: "OnlyImage API Key",
   passtheima_ge_api: "PassTheImage API Key",
@@ -1209,7 +1211,8 @@ const INLINE_FIELD_HELP = {
     linkOnNewLine: true,
   },
   blvckout_api_key: {
-    description: "A BLVCKOUT API key with read permission, for XXX movie metadata.",
+    description:
+      "A BLVCKOUT API key with read permission, for XXX movie metadata.",
   },
   twitch_client_id: {
     description:
@@ -1252,6 +1255,7 @@ const imageHostApiKeys = {
   imgbb: ["imgbb_api"],
   lensdump: ["lensdump_api"],
   lostimg: ["lostimg_api"],
+  luminapix: ["luminapix_api"],
   ptscreens: ["ptscreens_api"],
   onlyimage: ["onlyimage_api"],
   dalexni: ["dalexni_api"],
@@ -1283,6 +1287,7 @@ const IMAGE_HOST_LABELS = {
   imgbox: "Imgbox",
   lensdump: "LensDump",
   lostimg: "LostImg",
+  luminapix: "LuminaPix",
   midnightscene: "MidnightScene",
   onlyimage: "OnlyImage",
   passtheimage: "PassTheImage",
@@ -1368,6 +1373,7 @@ const trackerNameMap = {
   FLOOD: "Flood",
   FUNFILE: "FunFile",
   GREATPOSTERWALL: "Great Poster Wall",
+  HAPPYFAPPY: "HappyFappy",
   HAWKEUNO: "hawke-uno",
   HDBITS: "HDBits",
   HDSPACE: "HD-Space",
@@ -1378,6 +1384,7 @@ const trackerNameMap = {
   ITATORRENTS: "ItaTorrents",
   IPTORRENTS: "IPTorrents",
   LASTDIGITALUNDERGROUND: "LastDigitalUnderground",
+  KUFIRC: "Kufirc",
   LAJIDUI: "lajidui",
   LEMONHD: "LemonHD",
   LATTEAM: "Lat-Team",
@@ -1389,6 +1396,7 @@ const trackerNameMap = {
   MIDNIGHTSCENE: "MidnightScene",
   MTEAM: "M-Team",
   NEBULANCE: "Nebulance",
+  NIGHTBLOOM: "Nightbloom",
   NORDICQUALITY: "NordicQuality",
   NZBGEEK: "NZBGeek",
   OLDTOONSWORLD: "OldToonsWorld",
@@ -1415,6 +1423,7 @@ const trackerNameMap = {
   SAMARITANO: "Samaritano",
   SEEDPOOL: "seedpool",
   SHAREISLAND: "ShareIsland",
+  SIMURG: "Simurg",
   SKIPTHECOMMERCIALS: "SkipTheCommercials",
   SPEEDAPP: "SpeedApp",
   SWARMAZON: "Swarmazon",
@@ -3543,18 +3552,57 @@ function ConfigLeafEditor({
       normalizeClients(item.value),
     );
     const [isOpen, setIsOpen] = useState(false);
+    const [menuPosition, setMenuPosition] = useState(null);
     const dropdownRef = useRef(null);
+    const triggerRef = useRef(null);
+    const menuRef = useRef(null);
     const dropdownId = `${fieldId}--options`;
 
     useEffect(() => {
       setSelected(normalizeClients(item.value));
     }, [item.value]);
 
+    // The menu is portaled with fixed positioning so section/accordion
+    // containers with overflow-hidden cannot clip it.
+    React.useLayoutEffect(() => {
+      if (!isOpen) {
+        setMenuPosition(null);
+        return undefined;
+      }
+      const positionMenu = () => {
+        if (!triggerRef.current) return;
+        const bounds = triggerRef.current.getBoundingClientRect();
+        const viewportHeight = document.documentElement.clientHeight;
+        const spaceBelow = viewportHeight - bounds.bottom - 8;
+        const spaceAbove = bounds.top - 8;
+        const above = spaceBelow < Math.min(240, spaceAbove);
+        setMenuPosition({
+          left: bounds.left,
+          width: bounds.width,
+          maxHeight: Math.min(
+            240,
+            Math.max(0, above ? spaceAbove : spaceBelow),
+          ),
+          ...(above
+            ? { bottom: viewportHeight - bounds.top + 4 }
+            : { top: bounds.bottom + 4 }),
+        });
+      };
+      positionMenu();
+      window.addEventListener("resize", positionMenu);
+      document.addEventListener("scroll", positionMenu, true);
+      return () => {
+        window.removeEventListener("resize", positionMenu);
+        document.removeEventListener("scroll", positionMenu, true);
+      };
+    }, [isOpen, selected.length]);
+
     useEffect(() => {
       const handleClickOutside = (event) => {
         if (
           dropdownRef.current &&
-          !dropdownRef.current.contains(event.target)
+          !dropdownRef.current.contains(event.target) &&
+          !(menuRef.current && menuRef.current.contains(event.target))
         ) {
           setIsOpen(false);
         }
@@ -3606,6 +3654,7 @@ function ConfigLeafEditor({
         </div>
         <div className={`relative ${isOpen ? "z-30" : ""}`} ref={dropdownRef}>
           <div
+            ref={triggerRef}
             role="combobox"
             tabIndex={0}
             aria-controls={dropdownId}
@@ -3653,40 +3702,47 @@ function ConfigLeafEditor({
               className={`ua-config-accordion-chevron h-4 w-4 shrink-0 transition-transform ${isOpen ? "rotate-180" : "rotate-0"}`}
             />
           </div>
-          {isOpen && (
-            <div
-              id={dropdownId}
-              role="listbox"
-              aria-multiselectable="true"
-              className="ua-config-multiselect-menu absolute z-40 mt-1 max-h-60 w-full overflow-auto rounded-lg border shadow-lg"
-            >
-              {torrentClients.length === 0 ? (
-                <div className="ua-config-service-description px-3 py-2 text-sm">
-                  No torrent clients configured
-                </div>
-              ) : (
-                torrentClients.map((client) => (
-                  <div
-                    key={client}
-                    role="option"
-                    aria-selected={selected.includes(client)}
-                    data-selected={selected.includes(client) ? "true" : "false"}
-                    className="ua-config-multiselect-option cursor-pointer px-3 py-2"
-                  >
-                    <label className="flex w-full cursor-pointer items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={selected.includes(client)}
-                        onChange={() => toggleClient(client)}
-                        className="ua-theme-checkbox h-4 w-4"
-                      />
-                      {client}
-                    </label>
+          {isOpen &&
+            menuPosition &&
+            ReactDOM.createPortal(
+              <div
+                ref={menuRef}
+                id={dropdownId}
+                role="listbox"
+                aria-multiselectable="true"
+                style={menuPosition}
+                className="ua-config-multiselect-menu fixed z-50 overflow-auto rounded-lg border shadow-lg"
+              >
+                {torrentClients.length === 0 ? (
+                  <div className="ua-config-service-description px-3 py-2 text-sm">
+                    No torrent clients configured
                   </div>
-                ))
-              )}
-            </div>
-          )}
+                ) : (
+                  torrentClients.map((client) => (
+                    <div
+                      key={client}
+                      role="option"
+                      aria-selected={selected.includes(client)}
+                      data-selected={
+                        selected.includes(client) ? "true" : "false"
+                      }
+                      className="ua-config-multiselect-option cursor-pointer px-3 py-2"
+                    >
+                      <label className="flex w-full cursor-pointer items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={selected.includes(client)}
+                          onChange={() => toggleClient(client)}
+                          className="ua-theme-checkbox h-4 w-4"
+                        />
+                        {client}
+                      </label>
+                    </div>
+                  ))
+                )}
+              </div>,
+              triggerRef.current?.closest(".ua-config-page") || document.body,
+            )}
         </div>
       </div>
     );
@@ -4600,6 +4656,141 @@ function ReleaseGroupOverrides({
         </div>
       )}
     </section>
+  );
+}
+
+function SettingsReauthModal({ totpRequired, onCancel, onConfirmed }) {
+  const [password, setPassword] = useState("");
+  const [totpCode, setTotpCode] = useState("");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const dialogRef = useModalFocus(onCancel);
+
+  const submit = async (event) => {
+    event.preventDefault();
+    if (submitting || !password || (totpRequired && !totpCode.trim())) return;
+    setSubmitting(true);
+    setError("");
+    try {
+      const response = await apiFetch(`${API_BASE}/settings_reauth`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password, totp_code: totpCode.trim() }),
+      });
+      let data = {};
+      try {
+        data = await response.json();
+      } catch (_error) {
+        data = {};
+      }
+      if (response.ok && data.success) {
+        onConfirmed();
+        return;
+      }
+      setPassword("");
+      setTotpCode("");
+      setError(
+        response.status === 429
+          ? "Too many attempts. Try again later."
+          : data.error || "Password or 2FA code did not match.",
+      );
+    } catch (_error) {
+      setError("Unable to confirm the password. Try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onCancel();
+      }}
+    >
+      <form
+        ref={dialogRef}
+        className="ua-config-modal w-full max-w-md overflow-hidden rounded-xl border shadow-2xl"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-reauth-title"
+        tabIndex="-1"
+        onSubmit={submit}
+      >
+        <div className="ua-config-section-heading border-b px-4 py-3">
+          <h2 id="settings-reauth-title" className="text-base font-semibold">
+            Confirm your password
+          </h2>
+          <p className="ua-config-service-description mt-1 text-xs">
+            Settings can change which programs Upload Assistant runs, so changes
+            need a recent password confirmation. You won&apos;t be asked again
+            for 15 minutes.
+          </p>
+        </div>
+        <div className="space-y-3 p-4">
+          <div className="space-y-1">
+            <label
+              htmlFor="settings-reauth-password"
+              className="text-sm font-semibold"
+            >
+              Password
+            </label>
+            <input
+              id="settings-reauth-password"
+              type="password"
+              value={password}
+              className="ua-config-input w-full rounded-lg border px-3 py-2"
+              autoComplete="current-password"
+              data-ua-modal-initial-focus
+              onChange={(event) => setPassword(event.target.value)}
+            />
+          </div>
+          {totpRequired && (
+            <div className="space-y-1">
+              <label
+                htmlFor="settings-reauth-totp"
+                className="text-sm font-semibold"
+              >
+                2FA code
+              </label>
+              <input
+                id="settings-reauth-totp"
+                type="text"
+                inputMode="numeric"
+                value={totpCode}
+                className="ua-config-input w-full rounded-lg border px-3 py-2"
+                autoComplete="one-time-code"
+                onChange={(event) => setTotpCode(event.target.value)}
+              />
+            </div>
+          )}
+          {error && (
+            <p className="text-sm text-red-500" role="alert">
+              {error}
+            </p>
+          )}
+        </div>
+        <div className="flex justify-end gap-2 border-t px-4 py-3">
+          <button
+            type="button"
+            className="ua-config-service-action rounded-lg border px-4 py-2 text-sm font-semibold"
+            onClick={onCancel}
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="ua-config-save-button rounded-lg px-4 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={
+              submitting || !password || (totpRequired && !totpCode.trim())
+            }
+          >
+            {submitting ? "Confirming…" : "Confirm"}
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }
 
@@ -10220,6 +10411,25 @@ function ConfigApp() {
   );
   const folderPickerResolveRef = useRef(null);
   const [folderPicker, setFolderPicker] = useState(null);
+  // Requests that need a password confirmation share one prompt (see
+  // uaApiFetch in shared_utils.js).
+  const settingsReauthRef = useRef(null);
+  const [settingsReauth, setSettingsReauth] = useState(null);
+  useEffect(() => {
+    window.UAReauthPrompt = ({ totpRequired } = {}) => {
+      if (settingsReauthRef.current) return settingsReauthRef.current.promise;
+      let resolve;
+      const promise = new Promise((done) => {
+        resolve = done;
+      });
+      settingsReauthRef.current = { promise, resolve };
+      setSettingsReauth({ totpRequired: Boolean(totpRequired) });
+      return promise;
+    };
+    return () => {
+      delete window.UAReauthPrompt;
+    };
+  }, []);
   const [renameClientSource, setRenameClientSource] = useState("");
   const [clientTestStates, setClientTestStates] = useState(new Map());
   const [prowlarrTestState, setProwlarrTestState] = useState(null);
@@ -11252,7 +11462,20 @@ function ConfigApp() {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: clientName, config: clientConfig }),
+          body: JSON.stringify({
+            name: clientName,
+            // Saved credentials arrive as <REDACTED>; the server fills them
+            // in from this saved client (its pre-rename name, if renamed).
+            saved_name:
+              sections
+                .find((section) => section.section === "TORRENT_CLIENTS")
+                ?.items?.find(
+                  (item) =>
+                    String(item.key).toLowerCase() ===
+                    String(clientName).toLowerCase(),
+                )?.renamedFrom || clientName,
+            config: clientConfig,
+          }),
         },
       );
       const data = await response.json();
@@ -12354,6 +12577,13 @@ function ConfigApp() {
     if (resolve) resolve(selectedPath || null);
   };
 
+  const finishSettingsReauth = (confirmed) => {
+    const pending = settingsReauthRef.current;
+    settingsReauthRef.current = null;
+    setSettingsReauth(null);
+    if (pending) pending.resolve(confirmed);
+  };
+
   const handleLogout = async () => {
     try {
       const resp = await apiFetch("/logout", { method: "POST" });
@@ -12375,6 +12605,13 @@ function ConfigApp() {
         (isDarkMode ? "ua-mode-dark" : "ua-mode-light")
       }
     >
+      {settingsReauth && (
+        <SettingsReauthModal
+          totpRequired={settingsReauth.totpRequired}
+          onCancel={() => finishSettingsReauth(false)}
+          onConfirmed={() => finishSettingsReauth(true)}
+        />
+      )}
       {folderPicker && (
         <FolderPickerModal
           fieldLabel={folderPicker.fieldLabel}
