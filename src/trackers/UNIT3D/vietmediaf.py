@@ -31,8 +31,8 @@ class VietMediaF(UNIT3D):
     supported_categories = ("MOVIE", "TV")
     tracker_urls = (base_url,)
     allowed_bloated_audio_languages = ("vi", "tiếng việt", "tieng viet")
-    # VietMediaF allows infinite retry for rate limits and transient connection issues
-    search_max_retries: int = -1
+    # VietMediaF allows 10 retries for rate limits and transient connection issues
+    search_max_retries: int = 10
     trump_report_max_retries: int = 10
 
     _vmf_tag_pattern = re.compile(
