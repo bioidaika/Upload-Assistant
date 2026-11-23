@@ -44,5 +44,5 @@ RULES_PAGES: dict[str, RulesPage] = {
     "SEEDPOOL": RulesPage("https://forums.seedpool.org/t/upload-guide/17437", date(2026, 6, 21)),
     "SKIPTHECOMMERCIALS": RulesPage("https://skipthecommercials.xyz/wikis/2#coex", date(2026, 9, 24)),
     "ULCX": RulesPage("https://upload.cx/pages/12", date(2026, 11, 4)),
-    "VIETMEDIAF": RulesPage("https://tracker.vietmediaf.store/rules", date(2026, 10, 15)),
+    "VIETMEDIAF": RulesPage("https://tracker.vietmediaf.store/wikis/2", date(2026, 10, 15)),
 }
