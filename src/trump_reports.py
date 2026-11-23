@@ -406,8 +406,8 @@ def _resolve_max_retries(config: dict[str, Any], tracker: str, tracker_instance:
     tracker_cfg = config.get("TRACKERS", {}).get(tracker, {}) if isinstance(config, dict) else {}
     for source in (
         tracker_cfg.get("trump_report_max_retries") if isinstance(tracker_cfg, dict) else None,
-        tracker_cfg.get("search_max_retries") if isinstance(tracker_cfg, dict) else None,
         getattr(tracker_instance, "trump_report_max_retries", None),
+        tracker_cfg.get("search_max_retries") if isinstance(tracker_cfg, dict) else None,
         getattr(tracker_instance, "search_max_retries", None),
     ):
         if source is not None:
@@ -417,7 +417,7 @@ def _resolve_max_retries(config: dict[str, Any], tracker: str, tracker_instance:
         raw = None
 
     if raw is None:
-        return -1 if tracker.upper() == "VIETMEDIAF" else 3
+        return 10 if tracker.upper() == "VIETMEDIAF" else 3
 
     try:
         if isinstance(raw, str):
@@ -428,7 +428,7 @@ def _resolve_max_retries(config: dict[str, Any], tracker: str, tracker_instance:
             return int(raw)
     except (ValueError, TypeError):
         pass
-    return -1 if tracker.upper() == "VIETMEDIAF" else 3
+    return 10 if tracker.upper() == "VIETMEDIAF" else 3
 
 
 async def _send(meta: Meta, config: dict[str, Any], tracker: str, tracker_instance: Any, plan: TrumpPlan, trumping_id: Any) -> bool:

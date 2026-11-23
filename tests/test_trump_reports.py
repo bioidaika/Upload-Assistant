@@ -627,11 +627,11 @@ def test_a_plan_made_in_the_tracker_check_is_submitted_after_the_upload(monkeypa
     assert payload["trumping_torrent_id"] == 501
 
 
-def test_vietmediaf_defaults_to_infinite_retry() -> None:
+def test_vietmediaf_defaults_to_ten_retries() -> None:
     from src.trackers.UNIT3D.vietmediaf import VietMediaF
 
     vmf = VietMediaF({"DEFAULT": {}, "TRACKERS": {"VIETMEDIAF": {"api_key": "test"}}})
-    assert trump_reports._resolve_max_retries({}, "VIETMEDIAF", vmf) == -1
+    assert trump_reports._resolve_max_retries({}, "VIETMEDIAF", vmf) == 10
 
 
 def test_resolve_max_retries_honors_tracker_config() -> None:
@@ -768,3 +768,43 @@ async def test_send_stops_on_client_error_without_retry(monkeypatch: pytest.Monk
     success = await trump_reports._send(meta, {}, "VIETMEDIAF", vmf, plan, 999)
     assert success is False
     assert attempts == 1
+
+
+@pytest.mark.asyncio
+async def test_send_stops_after_max_retries_on_persistent_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    attempts = 0
+    sleeps: list[float] = []
+
+    async def fake_sleep(duration: float) -> None:
+        sleeps.append(duration)
+
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+
+    class AlwaysTimeoutClient:
+        def __init__(self, **_kwargs: Any) -> None:
+            pass
+
+        async def __aenter__(self) -> AlwaysTimeoutClient:
+            return self
+
+        async def __aexit__(self, *args: Any) -> None:
+            pass
+
+        async def post(self, url: str, headers: dict[str, str], json: dict[str, Any]) -> FakeResponse:
+            nonlocal attempts
+            attempts += 1
+            raise httpx.TimeoutException("timed out")
+
+    monkeypatch.setattr("src.trump_reports.httpx.AsyncClient", AlwaysTimeoutClient)
+    monkeypatch.setattr("src.api_key_expiry.observe_tracker_response", lambda *_args, **_kwargs: None)
+
+    plan = TrumpPlan("VIETMEDIAF", "11", OLD["name"], trump_reports.TRUMPABLE)
+    meta = Meta({"ua_name": "Upload Assistant", "trump_plans": {"VIETMEDIAF": plan.to_dict()}})
+    from src.trackers.UNIT3D.vietmediaf import VietMediaF
+
+    vmf = VietMediaF({"DEFAULT": {}, "TRACKERS": {"VIETMEDIAF": {"api_key": "fake-key"}}})
+
+    success = await trump_reports._send(meta, {}, "VIETMEDIAF", vmf, plan, 999)
+    assert success is False
+    assert attempts == 10
+    assert len(sleeps) == 9
