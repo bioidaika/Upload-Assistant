@@ -53,6 +53,7 @@ def test_vietmediaf_profile_uses_canonical_identity_and_unit3d_endpoints():
     assert vietmediaf.upload_url == "https://tracker.vietmediaf.store/api/torrents/upload"
     assert vietmediaf.torrent_url == "https://tracker.vietmediaf.store/torrents/"
     assert vietmediaf.search_max_retries == -1
+    assert vietmediaf.trump_report_max_retries == -1
     assert vietmediaf.banned_groups == ()
     assert vietmediaf.bad_release_groups == ("YIFY", "YTS", "mSD", "MeGusta", "3cTWeB", "FGT")
 

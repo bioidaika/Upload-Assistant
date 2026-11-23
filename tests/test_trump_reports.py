@@ -5,6 +5,7 @@ import asyncio
 from datetime import date
 from typing import Any, ClassVar
 
+import httpx
 import pytest
 
 from src import trump_reports
@@ -521,7 +522,7 @@ def test_a_refused_report_shows_the_sites_message(fake_http: type[FakeClient], m
     meta = Meta({"trump_plans": {"ULCX": plan.to_dict()}, "tracker_status": {"ULCX": {"upload": True, "torrent_id": 701}}})
 
     assert asyncio.run(trump_reports.submit_reports(meta, CONFIG, {"ULCX": ULCX})) == {"ULCX": False}
-    assert any("You already have an open report \[on] this torrent." in line for line in logged)
+    assert any(r"You already have an open report \[on] this torrent." in line for line in logged)
 
 
 def test_lst_refuses_a_non_numeric_torrent_id(fake_http: type[FakeClient]) -> None:
@@ -624,3 +625,146 @@ def test_a_plan_made_in_the_tracker_check_is_submitted_after_the_upload(monkeypa
     assert url == "https://aither.cc/api/trumping-reports/create"
     assert payload["reported_torrent_id"] == "11"
     assert payload["trumping_torrent_id"] == 501
+
+
+def test_vietmediaf_defaults_to_infinite_retry() -> None:
+    from src.trackers.UNIT3D.vietmediaf import VietMediaF
+
+    vmf = VietMediaF({"DEFAULT": {}, "TRACKERS": {"VIETMEDIAF": {"api_key": "test"}}})
+    assert trump_reports._resolve_max_retries({}, "VIETMEDIAF", vmf) == -1
+
+
+def test_resolve_max_retries_honors_tracker_config() -> None:
+    config = {"TRACKERS": {"AITHER": {"trump_report_max_retries": 5}}}
+    assert trump_reports._resolve_max_retries(config, "AITHER", None) == 5
+
+    config_inf = {"TRACKERS": {"AITHER": {"trump_report_max_retries": "infinite"}}}
+    assert trump_reports._resolve_max_retries(config_inf, "AITHER", None) == -1
+
+
+def test_resolve_max_retries_defaults_to_three_for_standard_trackers() -> None:
+    assert trump_reports._resolve_max_retries({}, "AITHER", None) == 3
+
+
+@pytest.mark.asyncio
+async def test_send_retries_on_timeout_and_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
+    attempts = 0
+    sleeps: list[float] = []
+
+    async def fake_sleep(duration: float) -> None:
+        sleeps.append(duration)
+
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+
+    class FlakyClient:
+        def __init__(self, **_kwargs: Any) -> None:
+            pass
+
+        async def __aenter__(self) -> FlakyClient:
+            return self
+
+        async def __aexit__(self, *args: Any) -> None:
+            pass
+
+        async def post(self, url: str, headers: dict[str, str], json: dict[str, Any]) -> FakeResponse:
+            nonlocal attempts
+            attempts += 1
+            if attempts < 3:
+                raise httpx.TimeoutException("timed out")
+            return FakeResponse(201, {"success": True})
+
+    monkeypatch.setattr("src.trump_reports.httpx.AsyncClient", FlakyClient)
+    monkeypatch.setattr("src.api_key_expiry.observe_tracker_response", lambda *_args, **_kwargs: None)
+
+    plan = TrumpPlan("VIETMEDIAF", "11", OLD["name"], trump_reports.TRUMPABLE)
+    meta = Meta({"ua_name": "Upload Assistant", "trump_plans": {"VIETMEDIAF": plan.to_dict()}})
+    from src.trackers.UNIT3D.vietmediaf import VietMediaF
+
+    vmf = VietMediaF({"DEFAULT": {}, "TRACKERS": {"VIETMEDIAF": {"api_key": "fake-key"}}})
+
+    success = await trump_reports._send(meta, {}, "VIETMEDIAF", vmf, plan, 999)
+    assert success is True
+    assert attempts == 3
+    assert len(sleeps) == 2
+
+
+@pytest.mark.asyncio
+async def test_send_retries_on_network_error_and_rate_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    attempts = 0
+    sleeps: list[float] = []
+
+    async def fake_sleep(duration: float) -> None:
+        sleeps.append(duration)
+
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+
+    class MultiErrorClient:
+        def __init__(self, **_kwargs: Any) -> None:
+            pass
+
+        async def __aenter__(self) -> MultiErrorClient:
+            return self
+
+        async def __aexit__(self, *args: Any) -> None:
+            pass
+
+        async def post(self, url: str, headers: dict[str, str], json: dict[str, Any]) -> FakeResponse:
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise httpx.ConnectError("Connection refused")
+            if attempts == 2:
+                resp = FakeResponse(429, {"message": "slow down"})
+                resp.headers = {"Retry-After": "2.5"}  # type: ignore[attr-defined]
+                return resp
+            if attempts == 3:
+                return FakeResponse(502, {"message": "bad gateway"})
+            return FakeResponse(200, {"success": True})
+
+    monkeypatch.setattr("src.trump_reports.httpx.AsyncClient", MultiErrorClient)
+    monkeypatch.setattr("src.api_key_expiry.observe_tracker_response", lambda *_args, **_kwargs: None)
+
+    plan = TrumpPlan("VIETMEDIAF", "11", OLD["name"], trump_reports.TRUMPABLE)
+    meta = Meta({"ua_name": "Upload Assistant", "trump_plans": {"VIETMEDIAF": plan.to_dict()}})
+    from src.trackers.UNIT3D.vietmediaf import VietMediaF
+
+    vmf = VietMediaF({"DEFAULT": {}, "TRACKERS": {"VIETMEDIAF": {"api_key": "fake-key"}}})
+
+    success = await trump_reports._send(meta, {}, "VIETMEDIAF", vmf, plan, 999)
+    assert success is True
+    assert attempts == 4
+    assert len(sleeps) == 3
+    assert sleeps[1] == 2.5
+
+
+@pytest.mark.asyncio
+async def test_send_stops_on_client_error_without_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    attempts = 0
+
+    class NonRetryableClient:
+        def __init__(self, **_kwargs: Any) -> None:
+            pass
+
+        async def __aenter__(self) -> NonRetryableClient:
+            return self
+
+        async def __aexit__(self, *args: Any) -> None:
+            pass
+
+        async def post(self, url: str, headers: dict[str, str], json: dict[str, Any]) -> FakeResponse:
+            nonlocal attempts
+            attempts += 1
+            return FakeResponse(422, {"message": "Report already exists."})
+
+    monkeypatch.setattr("src.trump_reports.httpx.AsyncClient", NonRetryableClient)
+    monkeypatch.setattr("src.api_key_expiry.observe_tracker_response", lambda *_args, **_kwargs: None)
+
+    plan = TrumpPlan("VIETMEDIAF", "11", OLD["name"], trump_reports.TRUMPABLE)
+    meta = Meta({"ua_name": "Upload Assistant", "trump_plans": {"VIETMEDIAF": plan.to_dict()}})
+    from src.trackers.UNIT3D.vietmediaf import VietMediaF
+
+    vmf = VietMediaF({"DEFAULT": {}, "TRACKERS": {"VIETMEDIAF": {"api_key": "fake-key"}}})
+
+    success = await trump_reports._send(meta, {}, "VIETMEDIAF", vmf, plan, 999)
+    assert success is False
+    assert attempts == 1

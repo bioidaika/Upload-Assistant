@@ -13,6 +13,7 @@ A tracker opts in by setting ``trump_support`` and implementing
 existing reports).
 """
 
+import asyncio
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from enum import Enum
@@ -401,6 +402,35 @@ async def submit_reports(meta: Meta, config: dict[str, Any], tracker_class_map: 
     return results
 
 
+def _resolve_max_retries(config: dict[str, Any], tracker: str, tracker_instance: Any) -> int:
+    tracker_cfg = config.get("TRACKERS", {}).get(tracker, {}) if isinstance(config, dict) else {}
+    for source in (
+        tracker_cfg.get("trump_report_max_retries") if isinstance(tracker_cfg, dict) else None,
+        tracker_cfg.get("search_max_retries") if isinstance(tracker_cfg, dict) else None,
+        getattr(tracker_instance, "trump_report_max_retries", None),
+        getattr(tracker_instance, "search_max_retries", None),
+    ):
+        if source is not None:
+            raw = source
+            break
+    else:
+        raw = None
+
+    if raw is None:
+        return -1 if tracker.upper() == "VIETMEDIAF" else 3
+
+    try:
+        if isinstance(raw, str):
+            if raw.strip().lower() in ("inf", "infinite", "unlimited", "-1"):
+                return -1
+            return int(raw)
+        if isinstance(raw, (int, float)):
+            return int(raw)
+    except (ValueError, TypeError):
+        pass
+    return -1 if tracker.upper() == "VIETMEDIAF" else 3
+
+
 async def _send(meta: Meta, config: dict[str, Any], tracker: str, tracker_instance: Any, plan: TrumpPlan, trumping_id: Any) -> bool:
     try:
         url, payload = tracker_instance.trump_report_request(plan, trumping_id, report_message(meta, plan))
@@ -416,26 +446,79 @@ async def _send(meta: Meta, config: dict[str, Any], tracker: str, tracker_instan
     from src.api_key_expiry import observe_tracker_response
 
     headers = {"Authorization": f"Bearer {tracker_instance.api_key}", "Content-Type": "application/json", "Accept": "application/json"}
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.post(url=url, headers=headers, json=payload)
-    except httpx.TimeoutException:
-        logger.info(f"[bold red]{tracker}: the trump report request timed out after 10 seconds.[/bold red]")
+    max_retries = _resolve_max_retries(config, tracker, tracker_instance)
+    attempt = 0
+
+    while True:
+        attempt += 1
+        req_timeout = min(30.0, 15.0 + (attempt - 1) * 5.0)
+        try:
+            async with httpx.AsyncClient(timeout=req_timeout) as client:
+                response = await client.post(url=url, headers=headers, json=payload)
+        except httpx.TimeoutException:
+            if max_retries < 0 or attempt < max_retries:
+                delay = 5.0
+                max_label = "infinite" if max_retries < 0 else str(max_retries)
+                logger.warning(
+                    f"{tracker}: [yellow]Trump report request timed out after {req_timeout:.0f}s. "
+                    f"Retrying in {delay:.1f}s... (attempt {attempt}/{max_label})[/yellow]"
+                )
+                await asyncio.sleep(delay)
+                continue
+            logger.info(f"[bold red]{tracker}: the trump report request timed out after {req_timeout:.0f}s.[/bold red]")
+            return False
+        except httpx.RequestError as e:
+            if max_retries < 0 or attempt < max_retries:
+                delay = 5.0
+                max_label = "infinite" if max_retries < 0 else str(max_retries)
+                logger.warning(
+                    f"{tracker}: [yellow]Network connection error ({e}) during trump report. "
+                    f"Retrying in {delay:.1f}s... (attempt {attempt}/{max_label})[/yellow]"
+                )
+                await asyncio.sleep(delay)
+                continue
+            logger.info(f"[bold red]{tracker}: the trump report request failed: {e}[/bold red]")
+            return False
+
+        observe_tracker_response(config, meta, tracker, response)
+        if response.status_code in (200, 201):
+            logger.info(f"[bold green]Successfully created trump report on {tracker}[/bold green]")
+            return True
+
+        if response.status_code == 429:
+            resp_headers = getattr(response, "headers", {})
+            retry_after_str = resp_headers.get("Retry-After") if hasattr(resp_headers, "get") else None
+            try:
+                delay = max(1.0, float(retry_after_str)) if retry_after_str else 5.0
+            except (ValueError, TypeError):
+                delay = 5.0
+            if max_retries < 0 or attempt < max_retries:
+                max_label = "infinite" if max_retries < 0 else str(max_retries)
+                logger.warning(
+                    f"{tracker}: [yellow]Rate limit (429) hit during trump report. "
+                    f"Retrying in {delay:.1f}s... (attempt {attempt}/{max_label})[/yellow]"
+                )
+                await asyncio.sleep(delay)
+                continue
+
+        if response.status_code >= 500:
+            if max_retries < 0 or attempt < max_retries:
+                delay = min(5.0 * min(attempt, 6), 30.0)
+                max_label = "infinite" if max_retries < 0 else str(max_retries)
+                logger.warning(
+                    f"{tracker}: [yellow]HTTP {response.status_code} during trump report. "
+                    f"Retrying in {delay:.1f}s... (attempt {attempt}/{max_label})[/yellow]"
+                )
+                await asyncio.sleep(delay)
+                continue
+
+        logger.info(f"[bold red]{tracker}: failed to create the trump report. HTTP Status: {response.status_code}[/bold red]")
+        try:
+            body: Any = response.json()
+        except ValueError:
+            body = None
+        site_message = cast(dict[str, Any], body).get("message") if isinstance(body, dict) else None
+        if site_message:
+            # e.g. ULCX answers 422 when an open report already exists for the torrent.
+            logger.info(f"[red]{tracker} said: {escape(str(site_message))}[/red]")
         return False
-    except httpx.RequestError as e:
-        logger.info(f"[bold red]{tracker}: the trump report request failed: {e}[/bold red]")
-        return False
-    observe_tracker_response(config, meta, tracker, response)
-    if response.status_code in (200, 201):
-        logger.info(f"[bold green]Successfully created trump report on {tracker}[/bold green]")
-        return True
-    logger.info(f"[bold red]{tracker}: failed to create the trump report. HTTP Status: {response.status_code}[/bold red]")
-    try:
-        body: Any = response.json()
-    except ValueError:
-        body = None
-    site_message = cast(dict[str, Any], body).get("message") if isinstance(body, dict) else None
-    if site_message:
-        # e.g. ULCX answers 422 when an open report already exists for the torrent.
-        logger.info(f"[red]{tracker} said: {escape(str(site_message))}[/red]")
-    return False
