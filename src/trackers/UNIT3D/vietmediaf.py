@@ -923,6 +923,10 @@ class VietMediaF(UNIT3D):
             "trumping_torrent_id": trumping_id,
             "message": message,
         }
+        if plan.reported_screenshots:
+            payload["screenshots_reported_torrent"] = ",".join(plan.reported_screenshots)
+        if plan.trumping_screenshots:
+            payload["screenshots_trumping_torrent"] = ",".join(plan.trumping_screenshots)
         return f"{self.trump_reports_url}/create", payload
 
     async def search_torrents(self, meta: Meta) -> list[dict[str, Any]]:
