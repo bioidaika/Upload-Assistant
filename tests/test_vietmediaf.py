@@ -1650,5 +1650,33 @@ def test_vietmediaf_upload_defaults_to_six_retries() -> None:
     assert max_retries == 6
 
 
+def test_vietmediaf_trump_report_request_includes_staff_deletion_notice():
+    from src.trump_reports import TrumpPlan
+
+    vmf = tracker()
+    meta = Meta(
+        name="Brave.2012.1080p.MA.WEB-DL.DDP5.1.Atmos.H.264-FIEND",
+        ua_name="Upload Assistant",
+        trump_reason="missing_vietnamese_subtitles",
+    )
+    plan = TrumpPlan(
+        tracker="VIETMEDIAF",
+        reported_id="8058",
+        reported_name="Brave.2012.REPACK.1080p.DSNP.WEB-DL.DD+5.1.Atmos.H.265-HONE",
+        reason="trumpable",
+        detail="missing_vietnamese_subtitles",
+    )
+    url, payload = vmf.trump_report_request(plan, "14950", "Upload Assistant trumpable release trump", meta=meta)
+    assert url == "https://tracker.vietmediaf.store/api/trumping-reports/create"
+    assert payload["reported_torrent_id"] == "8058"
+    assert payload["trumping_torrent_id"] == "14950"
+    msg = payload["message"]
+    assert "📋 Suggested deletion notice for staff to copy:" in msg
+    assert "https://tracker.vietmediaf.store/torrents/14950" in msg
+    assert "Brave.2012.1080p.MA.WEB-DL.DDP5.1.Atmos.H.264-FIEND" in msg
+    assert "Brave.2012.REPACK.1080p.DSNP.WEB-DL.DD+5.1.Atmos.H.265-HONE (ID: 8058)" in msg
+    assert "Please consider downloading the new torrent and seeding!" in msg
+
+
 
 

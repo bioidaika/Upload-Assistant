@@ -433,7 +433,10 @@ def _resolve_max_retries(config: dict[str, Any], tracker: str, tracker_instance:
 
 async def _send(meta: Meta, config: dict[str, Any], tracker: str, tracker_instance: Any, plan: TrumpPlan, trumping_id: Any) -> bool:
     try:
-        url, payload = tracker_instance.trump_report_request(plan, trumping_id, report_message(meta, plan))
+        try:
+            url, payload = tracker_instance.trump_report_request(plan, trumping_id, report_message(meta, plan), meta=meta)
+        except TypeError:
+            url, payload = tracker_instance.trump_report_request(plan, trumping_id, report_message(meta, plan))
     except ValueError as e:
         logger.info(f"[red]{tracker}: the trump report could not be built ({e}).[/red]")
         return False

@@ -976,11 +976,37 @@ class VietMediaF(UNIT3D):
                 logger.info(f"[bold red]{self.tracker}: failed to search trump reports after {max_retries} attempts: {e}[/bold red]")
                 return None
 
-    def trump_report_request(self, plan: TrumpPlan, trumping_id: Any, message: str) -> tuple[str, dict[str, Any]]:
+    def trump_report_request(
+        self,
+        plan: TrumpPlan,
+        trumping_id: Any,
+        message: str,
+        meta: Meta | None = None,
+    ) -> tuple[str, dict[str, Any]]:
+        from src.trackersetup import TrackerSetup
+
+        effective_meta = meta if meta is not None else Meta()
+        if plan.reported_name and not effective_meta.get(f"{self.tracker}_reported_torrent_name"):
+            effective_meta[f"{self.tracker}_reported_torrent_name"] = plan.reported_name
+        if plan.reason and not effective_meta.trump_reason:
+            effective_meta.trump_reason = plan.reason
+        if plan.comparison == "description":
+            effective_meta.screenshots_in_description = True
+
+        setup = TrackerSetup(self.config)
+        formatted_message = setup._build_trump_report_message(
+            meta=effective_meta,
+            tracker=self.tracker,
+            reported_torrent_id=str(plan.reported_id),
+            trumping_torrent_id=str(trumping_id) if trumping_id else None,
+            tracker_instance=self,
+            plan=plan,
+        )
+
         payload: dict[str, Any] = {
             "reported_torrent_id": plan.reported_id,
             "trumping_torrent_id": trumping_id,
-            "message": message,
+            "message": formatted_message,
         }
         if plan.reported_screenshots:
             payload["screenshots_reported_torrent"] = ",".join(plan.reported_screenshots)

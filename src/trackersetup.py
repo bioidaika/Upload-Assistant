@@ -210,10 +210,12 @@ class TrackerSetup:
         reported_torrent_id: str,
         trumping_torrent_id: str | None,
         tracker_instance: Any,
+        plan: Any = None,
     ) -> str:
         """Construct a structured trump report message with ready-to-copy deletion notice for staff."""
         reported_torrent_name = (
             meta.get(f"{tracker}_reported_torrent_name")
+            or getattr(plan, "reported_name", None)
             or meta.get(f"{tracker}_trumpable_name")
             or meta.get(f"{tracker}_matched_name")
             or meta.get("trumpable_name")
@@ -249,10 +251,14 @@ class TrackerSetup:
         }
         if meta.trump_reason in specific_reasons:
             reason_key = meta.trump_reason
-        elif meta.tv_pack:
+        elif getattr(plan, "detail", None) in specific_reasons:
+            reason_key = plan.detail
+        elif getattr(plan, "reason", None) in specific_reasons:
+            reason_key = plan.reason
+        elif meta.tv_pack or getattr(plan, "reason", None) == "season_pack":
             reason_key = "season_pack"
         else:
-            reason_key = meta.trump_reason or "trumpable_release"
+            reason_key = meta.trump_reason or getattr(plan, "detail", None) or getattr(plan, "reason", None) or "trumpable_release"
 
         reasons = {
             "missing_vietnamese_subtitles": (
@@ -292,10 +298,13 @@ class TrackerSetup:
                 "new replacement release",
             ),
         }
-        title, notice_reason = reasons.get(
-            reason_key,
-            (f"{meta.ua_name} trump report", "new replacement release"),
-        )
+        if reason_key in reasons:
+            title, notice_reason = reasons[reason_key]
+        elif getattr(plan, "detail", None):
+            title = f"{meta.ua_name or 'Upload Assistant'} trump: {plan.detail}"
+            notice_reason = str(plan.detail)
+        else:
+            title, notice_reason = f"{meta.ua_name or 'Upload Assistant'} trump report", "new replacement release"
         url_part = f" ({trumping_url})" if trumping_url else ""
         delete_notice = (
             f"This torrent has been replaced by: {trumping_name}{url_part} - {notice_reason}. "
@@ -308,7 +317,7 @@ class TrackerSetup:
             f"📋 Suggested deletion notice for staff to copy:\n"
             f"{delete_notice}"
         )
-        if meta.get("screenshots_in_description"):
+        if meta.get("screenshots_in_description") or getattr(plan, "comparison", None) == "description":
             message += "\n\n(Note: User says comparison screenshots are in description)."
         return message
 
