@@ -627,11 +627,11 @@ def test_a_plan_made_in_the_tracker_check_is_submitted_after_the_upload(monkeypa
     assert payload["trumping_torrent_id"] == 501
 
 
-def test_vietmediaf_defaults_to_ten_retries() -> None:
+def test_vietmediaf_defaults_to_six_retries() -> None:
     from src.trackers.UNIT3D.vietmediaf import VietMediaF
 
     vmf = VietMediaF({"DEFAULT": {}, "TRACKERS": {"VIETMEDIAF": {"api_key": "test"}}})
-    assert trump_reports._resolve_max_retries({}, "VIETMEDIAF", vmf) == 10
+    assert trump_reports._resolve_max_retries({}, "VIETMEDIAF", vmf) == 6
 
 
 def test_resolve_max_retries_honors_tracker_config() -> None:
@@ -806,5 +806,5 @@ async def test_send_stops_after_max_retries_on_persistent_timeout(monkeypatch: p
 
     success = await trump_reports._send(meta, {}, "VIETMEDIAF", vmf, plan, 999)
     assert success is False
-    assert attempts == 10
-    assert len(sleeps) == 9
+    assert attempts == 6
+    assert len(sleeps) == 5

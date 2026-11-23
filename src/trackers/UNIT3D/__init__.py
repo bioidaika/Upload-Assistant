@@ -883,9 +883,10 @@ class UNIT3D:
         if meta.debug is False:
             response_data = {}
             try:
-                default_retries = self.config.get("DEFAULT", {}).get("max_retries", 2)
+                tracker_retries = getattr(self, "max_retries", 2)
+                default_retries = self.config.get("DEFAULT", {}).get("max_retries", tracker_retries)
                 max_retries = max(1, int(self.tracker_config.get("max_retries", default_retries)))
-            except ValueError, TypeError:
+            except (ValueError, TypeError):
                 max_retries = 2
             retry_delay = 5
             timeout = 40.0

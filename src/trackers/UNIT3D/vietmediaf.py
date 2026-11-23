@@ -1,4 +1,5 @@
 # Upload Assistant © 2026 Audionut & wastaken7 — Licensed under UAPL v1.0
+import asyncio
 import re
 import unicodedata
 from typing import Any, cast
@@ -31,9 +32,10 @@ class VietMediaF(UNIT3D):
     supported_categories = ("MOVIE", "TV")
     tracker_urls = (base_url,)
     allowed_bloated_audio_languages = ("vi", "tiếng việt", "tieng viet")
-    # VietMediaF allows 10 retries for rate limits and transient connection issues
-    search_max_retries: int = 10
-    trump_report_max_retries: int = 10
+    # VietMediaF allows 6 retries for rate limits and transient connection issues
+    search_max_retries: int = 6
+    trump_report_max_retries: int = 6
+    max_retries: int = 6
 
     _vmf_tag_pattern = re.compile(
         r"(?<![A-Za-z0-9])(?:ViE(?:[ .-]+(?P<dub>(?i:DUB)))?|(?P<casefolded_dub>(?i:VIE[ .-]+DUB)))(?![A-Za-z0-9])"
@@ -881,41 +883,98 @@ class VietMediaF(UNIT3D):
         """Trump reports already filed for a torrent on VietMediaF; None when the site could not be searched."""
         _ = meta
         headers = {"Authorization": f"Bearer {self.api_key}", "Accept": "application/json"}
-        params: dict[str, str] = {"reported_torrent_id": str(reported_id)}
-        reports: list[dict[str, Any]] = []
-        requested_cursors: set[str] = set()
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                while True:
-                    response = await client.get(f"{self.trump_reports_url}/filter", headers=headers, params=params)
-                    if response.status_code != 200:
-                        logger.info(f"[bold red]{self.tracker}: failed to search trump reports. HTTP Status: {response.status_code}[/bold red]")
-                        return None
-                    data: Any = response.json()
-                    body = cast(dict[str, Any], data) if isinstance(data, dict) else {}
-                    page: Any = body.get("data") if isinstance(body.get("data"), list) else body.get("results")
-                    if not isinstance(page, list):
-                        logger.info(f"[bold red]{self.tracker}: unexpected trump report search response.[/bold red]")
-                        return None
-                    for item in cast(list[Any], page):
-                        if not isinstance(item, dict):
-                            continue
-                        entry = cast(dict[str, Any], item)
-                        trumping = entry.get("trumping_torrent")
-                        torrents: list[Any] = [trumping] if isinstance(trumping, dict) else cast(list[Any], trumping) if isinstance(trumping, list) else []
-                        reports.append({"id": entry.get("id"), "title": entry.get("title"), "solved": entry.get("solved"), "trumping_torrent": torrents})
-                    meta_info = body.get("meta")
-                    next_cursor = cast(dict[str, Any], meta_info).get("next_cursor") if isinstance(meta_info, dict) else None
-                    if not next_cursor:
-                        return reports
-                    if str(next_cursor) in requested_cursors:
-                        logger.info(f"[bold red]{self.tracker}: the trump report search repeated a page.[/bold red]")
-                        return None
-                    requested_cursors.add(str(next_cursor))
-                    params["cursor"] = str(next_cursor)
-        except (httpx.HTTPError, ValueError) as e:
-            logger.info(f"[bold red]{self.tracker}: failed to search trump reports: {e}[/bold red]")
-            return None
+        max_retries = getattr(self, "search_max_retries", 6)
+        attempt = 0
+        while True:
+            attempt += 1
+            reports: list[dict[str, Any]] = []
+            requested_cursors: set[str] = set()
+            params: dict[str, str] = {"reported_torrent_id": str(reported_id)}
+            req_timeout = min(30.0, 15.0 + (attempt - 1) * 5.0)
+            should_retry = False
+            try:
+                async with httpx.AsyncClient(timeout=req_timeout) as client:
+                    while True:
+                        response = await client.get(f"{self.trump_reports_url}/filter", headers=headers, params=params)
+                        if response.status_code == 429:
+                            retry_after = response.headers.get("Retry-After")
+                            try:
+                                delay = max(1.0, float(retry_after)) if retry_after else 5.0
+                            except (ValueError, TypeError):
+                                delay = 5.0
+                            if attempt < max_retries:
+                                logger.warning(
+                                    f"{self.tracker}: [yellow]Rate limit (429) during trump report search. "
+                                    f"Retrying in {delay:.1f}s... (attempt {attempt}/{max_retries})[/yellow]"
+                                )
+                                await asyncio.sleep(delay)
+                                should_retry = True
+                                break
+                            response.raise_for_status()
+
+                        if response.status_code >= 500:
+                            if attempt < max_retries:
+                                delay = min(5.0 * min(attempt, 6), 30.0)
+                                logger.warning(
+                                    f"{self.tracker}: [yellow]HTTP {response.status_code} during trump report search. "
+                                    f"Retrying in {delay:.1f}s... (attempt {attempt}/{max_retries})[/yellow]"
+                                )
+                                await asyncio.sleep(delay)
+                                should_retry = True
+                                break
+
+                        if response.status_code != 200:
+                            logger.info(f"[bold red]{self.tracker}: failed to search trump reports. HTTP Status: {response.status_code}[/bold red]")
+                            return None
+
+                        data: Any = response.json()
+                        body = cast(dict[str, Any], data) if isinstance(data, dict) else {}
+                        page: Any = body.get("data") if isinstance(body.get("data"), list) else body.get("results")
+                        if not isinstance(page, list):
+                            logger.info(f"[bold red]{self.tracker}: unexpected trump report search response.[/bold red]")
+                            return None
+                        for item in cast(list[Any], page):
+                            if not isinstance(item, dict):
+                                continue
+                            entry = cast(dict[str, Any], item)
+                            trumping = entry.get("trumping_torrent")
+                            torrents: list[Any] = [trumping] if isinstance(trumping, dict) else cast(list[Any], trumping) if isinstance(trumping, list) else []
+                            reports.append({"id": entry.get("id"), "title": entry.get("title"), "solved": entry.get("solved"), "trumping_torrent": torrents})
+                        meta_info = body.get("meta")
+                        next_cursor = cast(dict[str, Any], meta_info).get("next_cursor") if isinstance(meta_info, dict) else None
+                        if not next_cursor:
+                            return reports
+                        if str(next_cursor) in requested_cursors:
+                            logger.info(f"[bold red]{self.tracker}: the trump report search repeated a page.[/bold red]")
+                            return None
+                        requested_cursors.add(str(next_cursor))
+                        params["cursor"] = str(next_cursor)
+
+                if should_retry:
+                    continue
+                return reports
+            except httpx.TimeoutException:
+                if attempt < max_retries:
+                    delay = 5.0
+                    logger.warning(
+                        f"{self.tracker}: [yellow]Trump report search request timed out after {req_timeout:.0f}s. "
+                        f"Retrying in {delay:.1f}s... (attempt {attempt}/{max_retries})[/yellow]"
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                logger.info(f"[bold red]{self.tracker}: trump report search timed out after {max_retries} attempts.[/bold red]")
+                return None
+            except (httpx.HTTPError, ValueError) as e:
+                if attempt < max_retries:
+                    delay = 5.0
+                    logger.warning(
+                        f"{self.tracker}: [yellow]Network connection error ({e}) during trump report search. "
+                        f"Retrying in {delay:.1f}s... (attempt {attempt}/{max_retries})[/yellow]"
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                logger.info(f"[bold red]{self.tracker}: failed to search trump reports after {max_retries} attempts: {e}[/bold red]")
+                return None
 
     def trump_report_request(self, plan: TrumpPlan, trumping_id: Any, message: str) -> tuple[str, dict[str, Any]]:
         payload: dict[str, Any] = {

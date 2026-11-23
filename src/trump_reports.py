@@ -417,7 +417,7 @@ def _resolve_max_retries(config: dict[str, Any], tracker: str, tracker_instance:
         raw = None
 
     if raw is None:
-        return 10 if tracker.upper() == "VIETMEDIAF" else 3
+        return 6 if tracker.upper() == "VIETMEDIAF" else 3
 
     try:
         if isinstance(raw, str):
@@ -428,7 +428,7 @@ def _resolve_max_retries(config: dict[str, Any], tracker: str, tracker_instance:
             return int(raw)
     except (ValueError, TypeError):
         pass
-    return 10 if tracker.upper() == "VIETMEDIAF" else 3
+    return 6 if tracker.upper() == "VIETMEDIAF" else 3
 
 
 async def _send(meta: Meta, config: dict[str, Any], tracker: str, tracker_instance: Any, plan: TrumpPlan, trumping_id: Any) -> bool:

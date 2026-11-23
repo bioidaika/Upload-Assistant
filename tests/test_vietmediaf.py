@@ -2,8 +2,10 @@ import asyncio
 import json
 import sys
 from types import ModuleType
+from typing import Any
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 
 from data.example_config import config as example_config
@@ -52,8 +54,9 @@ def test_vietmediaf_profile_uses_canonical_identity_and_unit3d_endpoints():
     assert vietmediaf.search_url == "https://tracker.vietmediaf.store/api/torrents/filter"
     assert vietmediaf.upload_url == "https://tracker.vietmediaf.store/api/torrents/upload"
     assert vietmediaf.torrent_url == "https://tracker.vietmediaf.store/torrents/"
-    assert vietmediaf.search_max_retries == 10
-    assert vietmediaf.trump_report_max_retries == 10
+    assert vietmediaf.search_max_retries == 6
+    assert vietmediaf.trump_report_max_retries == 6
+    assert vietmediaf.max_retries == 6
     assert vietmediaf.banned_groups == ()
     assert vietmediaf.bad_release_groups == ("YIFY", "YTS", "mSD", "MeGusta", "3cTWeB", "FGT")
 
@@ -1567,6 +1570,84 @@ async def test_vietmediaf_hdr_upgrade_trumps_narrower_hdr_in_same_slot():
     assert dv_slot_decision.reason == "No release on the site is using this slot yet."
     assert dv_slot_decision.conflicts == []
     assert "DV" in dv_slot_decision.slot
+
+
+@pytest.mark.asyncio
+async def test_find_trump_reports_retries_on_timeout_and_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
+    attempts = 0
+    sleeps: list[float] = []
+
+    async def fake_sleep(duration: float) -> None:
+        sleeps.append(duration)
+
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+
+    class FlakyClient:
+        def __init__(self, **_kwargs: Any) -> None:
+            pass
+
+        async def __aenter__(self) -> "FlakyClient":
+            return self
+
+        async def __aexit__(self, *args: Any) -> None:
+            pass
+
+        async def get(self, url: str, headers: dict[str, str], params: dict[str, str]) -> httpx.Response:
+            nonlocal attempts
+            attempts += 1
+            if attempts < 3:
+                raise httpx.TimeoutException("timeout")
+            req = httpx.Request("GET", url)
+            return httpx.Response(200, json={"data": [{"id": 1, "title": "trump report"}], "meta": {}}, request=req)
+
+    monkeypatch.setattr("src.trackers.UNIT3D.vietmediaf.httpx.AsyncClient", FlakyClient)
+    vmf = tracker()
+    res = await vmf.find_trump_reports(Meta(), "123")
+    assert res is not None
+    assert len(res) == 1
+    assert attempts == 3
+    assert len(sleeps) == 2
+
+
+@pytest.mark.asyncio
+async def test_find_trump_reports_stops_after_max_retries(monkeypatch: pytest.MonkeyPatch) -> None:
+    attempts = 0
+    sleeps: list[float] = []
+
+    async def fake_sleep(duration: float) -> None:
+        sleeps.append(duration)
+
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+
+    class ErrorClient:
+        def __init__(self, **_kwargs: Any) -> None:
+            pass
+
+        async def __aenter__(self) -> "ErrorClient":
+            return self
+
+        async def __aexit__(self, *args: Any) -> None:
+            pass
+
+        async def get(self, url: str, headers: dict[str, str], params: dict[str, str]) -> httpx.Response:
+            nonlocal attempts
+            attempts += 1
+            raise httpx.ConnectError("refused")
+
+    monkeypatch.setattr("src.trackers.UNIT3D.vietmediaf.httpx.AsyncClient", ErrorClient)
+    vmf = tracker()
+    res = await vmf.find_trump_reports(Meta(), "123")
+    assert res is None
+    assert attempts == 6
+    assert len(sleeps) == 5
+
+
+def test_vietmediaf_upload_defaults_to_six_retries() -> None:
+    vmf = VietMediaF({"DEFAULT": {}, "TRACKERS": {"VIETMEDIAF": {"api_key": "test"}}})
+    tracker_retries = getattr(vmf, "max_retries", 2)
+    default_retries = vmf.config.get("DEFAULT", {}).get("max_retries", tracker_retries)
+    max_retries = max(1, int(vmf.tracker_config.get("max_retries", default_retries)))
+    assert max_retries == 6
 
 
 
