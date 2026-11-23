@@ -24,7 +24,7 @@ from src.meta import Meta
 from src.prompt_sound import play_prompt_sound
 from src.slot_rules.models import SlotDecision, Verdict
 from src.trackersetup import tracker_class_map
-from src.trump_reports import ReviewOutcome, TrumpCandidate
+from src.trump_reports import ReviewOutcome, TrumpCandidate, TrumpPlan
 
 DupeEntry = dict[str, Any]
 
@@ -543,6 +543,83 @@ class UploadHelper:
             # When dupes are allowed anyway, only an exact match still needs the trump question.
             return candidates if meta.dupe is False else [candidate for candidate in candidates if candidate.reason == trump_reports.EXACT_MATCH]
 
+        def _apply_slot_trump(decision: SlotDecision | None, trumpable_entries: list[Any] | None = None) -> None:
+            meta.were_trumping = True
+            conflict = (
+                decision.conflicts[0]
+                if decision and decision.conflicts and isinstance(decision.conflicts[0], dict)
+                else {}
+            )
+            conflict_id = conflict.get("id")
+            conflict_name = conflict.get("name")
+            target_id = (
+                (trumpable_entries[0].get("id") if trumpable_entries else None)
+                or meta.trumpable_id
+                or conflict_id
+                or meta.get(f"{tracker_name}_matched_id", None)
+            )
+            target_name = (
+                (trumpable_entries[0].get("name") if trumpable_entries else None)
+                or meta.trumpable_name
+                or conflict_name
+                or meta.get(f"{tracker_name}_matched_name", None)
+            )
+            if not meta.get(f"{tracker_name}_trumpable_id"):
+                meta[f"{tracker_name}_trumpable_id"] = target_id
+            if not meta.trumpable_id and meta.get(f"{tracker_name}_trumpable_id"):
+                meta.trumpable_id = meta[f"{tracker_name}_trumpable_id"]
+            if not meta.get(f"{tracker_name}_trumpable_name"):
+                meta[f"{tracker_name}_trumpable_name"] = target_name
+            if not meta.trumpable_name and meta.get(f"{tracker_name}_trumpable_name"):
+                meta.trumpable_name = meta[f"{tracker_name}_trumpable_name"]
+
+            why_lower = (decision.why if decision and decision.why else "").lower()
+            if trumpable_entries and trumpable_entries[0].get("trump_reason"):
+                meta.trump_reason = trumpable_entries[0].get("trump_reason")
+            elif meta.get(f"{tracker_name}_trump_reason"):
+                meta.trump_reason = meta.get(f"{tracker_name}_trump_reason")
+            elif "repack" in why_lower or "proper" in why_lower:
+                meta.trump_reason = "repack"
+            elif "bad release group" in why_lower:
+                meta.trump_reason = "bad_release_group"
+            elif "subtitle" in why_lower:
+                meta.trump_reason = "missing_vietnamese_subtitles"
+            elif "dual" in why_lower and "audio" in why_lower:
+                meta.trump_reason = "missing_dual_vietnamese_audio"
+            elif "audio" in why_lower:
+                meta.trump_reason = "fewer_vietnamese_audio_tracks"
+            elif "hdr" in why_lower or "priority over" in why_lower:
+                meta.trump_reason = "hdr_upgrade"
+            elif meta.filename_match and meta.file_count_match:
+                meta.trump_reason = "exact_match"
+            else:
+                meta.trump_reason = "trumpable_release"
+
+            tracker_support = trump_reports.support(get_tracker())
+            if tracker_support is not None and target_id and (not meta.unattended or meta.unattended_auto):
+                comparison = "description" if meta.screenshots_in_description or not tracker_support.comparison else ""
+                reason_map = {
+                    "exact_match": trump_reports.EXACT_MATCH,
+                    "repack": trump_reports.SLOT_RULES,
+                    "bad_release_group": trump_reports.SLOT_RULES,
+                    "missing_vietnamese_subtitles": trump_reports.SLOT_RULES,
+                    "missing_dual_vietnamese_audio": trump_reports.SLOT_RULES,
+                    "fewer_vietnamese_audio_tracks": trump_reports.SLOT_RULES,
+                    "hdr_upgrade": trump_reports.SLOT_RULES,
+                }
+                plan_reason = reason_map.get(meta.trump_reason, trump_reports.TRUMPABLE)
+                plan = TrumpPlan(
+                    tracker=tracker_name,
+                    reported_id=str(target_id),
+                    reported_name=str(target_name or ""),
+                    reason=plan_reason,
+                    reported_link=str((trumpable_entries[0].get("link") if trumpable_entries else None) or conflict.get("link") or ""),
+                    detail=decision.why if decision and decision.why else meta.trump_reason,
+                    rules_url=decision.rules_url if decision else "",
+                    comparison=comparison,
+                )
+                meta.trump_plans[tracker_name] = plan.to_dict()
+
         if not dupes_list:
             needs_answer = slot_verdict is Verdict.BLOCK or (slot_verdict is Verdict.REVIEW and bool(slot_decision and slot_decision.conflicts))
             if slot_decision is not None and needs_answer:
@@ -567,6 +644,12 @@ class UploadHelper:
                 return (not upload), meta
             if slot_decision is not None and slot_decision.conflicts:
                 self._show_slot_decision(slot_decision, meta)
+                if slot_verdict is Verdict.ALLOW and tracker_name in ["AITHER", "LST", "VIETMEDIAF"]:
+                    _apply_slot_trump(slot_decision)
+                    logger.info(
+                        f"[bold green]{tracker_name}: Slot rules allow replacing existing release; "
+                        f"will report trump after upload (reason: {meta.trump_reason}).[/bold green]"
+                    )
             # Slot rules may find a release the upload replaces even when the basic check finds no dupes.
             slot_candidates = trump_candidates([]) if trump_reports.slot_trumps(slot_decision) else []
             if slot_candidates and await self._review_trump(meta, tracker_name, get_tracker(), slot_candidates, _format_dupe) is ReviewOutcome.SKIP_UPLOAD:
@@ -686,7 +769,10 @@ class UploadHelper:
         elif meta.dupe is not False:
             upload = True
         elif meta.unattended_auto and slot_verdict is not Verdict.BLOCK and (
-            (trumpable_text and (meta.trumpable_id or (meta.season_pack_contains_episode and meta.get(f"{tracker_name}_matched_episode_ids", []))))
+            (
+                (any(isinstance(entry, dict) and entry.get("trumpable") for entry in dupes_list) or meta.trumpable_id)
+                and (meta.trumpable_id or (meta.season_pack_contains_episode and meta.get(f"{tracker_name}_matched_episode_ids", [])))
+            )
             or (
                 meta.filename_match
                 and meta.file_count_match

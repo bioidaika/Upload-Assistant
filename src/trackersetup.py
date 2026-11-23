@@ -203,6 +203,115 @@ class TrackerSetup:
             return None
         return tracker_class(self.config)
 
+    def _build_trump_report_message(
+        self,
+        meta: Meta,
+        tracker: str,
+        reported_torrent_id: str,
+        trumping_torrent_id: str | None,
+        tracker_instance: Any,
+    ) -> str:
+        """Construct a structured trump report message with ready-to-copy deletion notice for staff."""
+        reported_torrent_name = (
+            meta.get(f"{tracker}_reported_torrent_name")
+            or meta.get(f"{tracker}_trumpable_name")
+            or meta.get(f"{tracker}_matched_name")
+            or meta.get("trumpable_name")
+        )
+        reported_display = (
+            f"{reported_torrent_name} (ID: {reported_torrent_id})"
+            if reported_torrent_name
+            else f"ID: {reported_torrent_id}"
+        )
+
+        trumping_name = meta.name or meta.clean_name or meta.ua_name or "New Release"
+        trumping_display = (
+            f"{trumping_name} (ID: {trumping_torrent_id})"
+            if trumping_torrent_id
+            else trumping_name
+        )
+
+        torrent_base_url = getattr(tracker_instance, "torrent_url", "")
+        trumping_url = (
+            f"{torrent_base_url}{trumping_torrent_id}"
+            if torrent_base_url and trumping_torrent_id
+            else ""
+        )
+
+        specific_reasons = {
+            "missing_vietnamese_subtitles",
+            "missing_dual_vietnamese_audio",
+            "fewer_vietnamese_audio_tracks",
+            "bad_release_group",
+            "repack",
+            "hdr_upgrade",
+            "exact_match",
+        }
+        if meta.trump_reason in specific_reasons:
+            reason_key = meta.trump_reason
+        elif meta.tv_pack:
+            reason_key = "season_pack"
+        else:
+            reason_key = meta.trump_reason or "trumpable_release"
+
+        reasons = {
+            "missing_vietnamese_subtitles": (
+                "Release adds Vietnamese subtitles",
+                "release adds Vietnamese subtitles",
+            ),
+            "missing_dual_vietnamese_audio": (
+                "Release adds dual Vietnamese audio (TM+LT)",
+                "release adds dual Vietnamese audio (TM+LT)",
+            ),
+            "fewer_vietnamese_audio_tracks": (
+                "Release adds more Vietnamese audio tracks",
+                "release adds more Vietnamese audio tracks",
+            ),
+            "bad_release_group": (
+                "Proper encode replacing bad release group (YIFY/YTS/mSD/MeGusta/FGT)",
+                "proper encode replacing bad release group",
+            ),
+            "repack": (
+                "REPACK/PROPER replacing original release",
+                "REPACK/PROPER replacement from the same release group",
+            ),
+            "hdr_upgrade": (
+                "Broader HDR package replacing existing release",
+                "broader HDR package replacement",
+            ),
+            "exact_match": (
+                "Exact filename trump",
+                "exact filename replacement",
+            ),
+            "season_pack": (
+                "Season pack trump",
+                "full season pack replacement",
+            ),
+            "trumpable_release": (
+                "Trumpable release trump",
+                "new replacement release",
+            ),
+        }
+        title, notice_reason = reasons.get(
+            reason_key,
+            (f"{meta.ua_name} trump report", "new replacement release"),
+        )
+        url_part = f" ({trumping_url})" if trumping_url else ""
+        delete_notice = (
+            f"This torrent has been replaced by: {trumping_name}{url_part} - {notice_reason}. "
+            "Please consider downloading the new torrent and seeding!"
+        )
+        message = (
+            f"Trump Report: {title}\n\n"
+            f"• Reported torrent: {reported_display}\n"
+            f"• Trumping torrent: {trumping_display}\n\n"
+            f"📋 Suggested deletion notice for staff to copy:\n"
+            f"{delete_notice}"
+        )
+        if meta.get("screenshots_in_description"):
+            message += "\n\n(Note: User says comparison screenshots are in description)."
+        return message
+
     def filter_unsupported_trackers(self, meta: Meta) -> None:
         category = meta.category
         if not category:

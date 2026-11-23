@@ -572,6 +572,10 @@ class Meta:
     transmission_label: str | None = None
     # Trump reports to send after uploading, per tracker (``src.trump_reports.TrumpPlan`` as a dict).
     trump_plans: dict[str, dict[str, Any]] = field(default_factory=dict[str, dict[str, Any]])
+    trumpable_id: int | str | None = None
+    trumpable_name: str = ""
+    trump_reason: str = ""
+    were_trumping: bool = False
     tv_movie: bool = False
     tv_pack: bool = False
     tvdb_episode_data: dict[str, Any] = field(default_factory=dict[str, Any])
