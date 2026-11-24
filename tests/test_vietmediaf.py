@@ -650,6 +650,57 @@ def test_vietmediaf_slot_rules_trumps_fewer_vietnamese_audio_tracks():
     assert "more Vietnamese audio tracks" in decision.why
 
 
+def test_vietmediaf_slot_rules_vie_upload_does_not_trump_original_audio_slot():
+    from src.slot_rules.trackers.vietmediaf import VietMediaFSlotRules
+    from src.slot_rules.models import Verdict
+    from src.slot_rules.profile import ReleaseProfile, WEBDL, H264
+
+    meta = Meta(
+        name="Steps 2026 1080p NF WEB-DL Dual-Audio DD+ 5.1 Atmos H.264-KSC",
+        clean_name="Steps.2026.ViE.1080p.NF.WEB-DL.DDP5.1.Atmos.H.264-KSC",
+        category="MOVIE",
+        audio_languages=["en", "vi"],
+        mediainfo={
+            "media": {
+                "track": [
+                    {"@type": "Audio", "Language": "en"},
+                    {"@type": "Audio", "Language": "vi", "Title": "Thuyết Minh"},
+                ]
+            }
+        },
+    )
+    rules = VietMediaFSlotRules(meta)
+    upload = ReleaseProfile(
+        name=meta.name,
+        resolution="1080p",
+        kind=WEBDL,
+        codec=H264,
+        audio_languages=frozenset({"en", "vi"}),
+    )
+    existing = ReleaseProfile(
+        name="Steps 2026 1080p NF WEB-DL DD+ 5.1 Atmos H.264-FLUX",
+        resolution="1080p",
+        kind=WEBDL,
+        codec=H264,
+        audio_languages=frozenset({"en"}),
+        entry={
+            "id": 12345,
+            "name": "Steps 2026 1080p NF WEB-DL DD+ 5.1 Atmos H.264-FLUX",
+            "media_info": "Audio #1\nLanguage : English\n",
+        },
+    )
+
+    assert rules.audio_slot(upload) == "ViE"
+    assert rules.audio_slot(existing) == "Original"
+
+    decision = rules.evaluate(upload, [existing])
+    assert decision is not None
+    assert decision.verdict == Verdict.ALLOW
+    assert decision.trump is False
+    assert decision.conflicts == []
+    assert "ViE" in decision.slot
+
+
 def test_vietmediaf_incomplete_pack_naming():
     from src.trackers.naming import add_incomplete_pack_marker, INCOMPLETE_PACK_TRACKERS
 

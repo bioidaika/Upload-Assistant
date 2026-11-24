@@ -34,11 +34,31 @@ class VietMediaFSlotRules(SlotRules):
 
     def audio_slot(self, profile: ReleaseProfile) -> str:
         tag = VietMediaF._existing_audio_tag(profile.name)
-        if tag is None and self.meta is not None and getattr(profile, "exact", False) is False:
-            meta_name = getattr(self.meta, "name", "") or ""
-            meta_clean = getattr(self.meta, "clean_name", "") or ""
-            if profile.name in (meta_name, meta_clean) or not tag:
+        if tag is None:
+            # Only use self.meta (the upload's metadata) for the release being uploaded.
+            is_upload = (
+                profile is getattr(self, "_upload_profile", None)
+                or (
+                    self.meta is not None
+                    and getattr(profile, "exact", False) is False
+                    and (
+                        (profile.name and profile.name in (getattr(self.meta, "name", "") or "", getattr(self.meta, "clean_name", "") or ""))
+                        or (not profile.entry and not getattr(self.meta, "name", ""))
+                    )
+                )
+            )
+            if is_upload and self.meta is not None and getattr(profile, "exact", False) is False:
                 tag = VietMediaF._metadata_audio_tag(self.meta)
+            elif profile.entry:
+                existing_entry = dict(profile.entry)
+                if VietMediaF._has_dual_vietnamese_audio_entry(existing_entry):
+                    tag = "dub"
+                elif VietMediaF._count_vietnamese_audio_tracks_entry(existing_entry) > 0 or (
+                    profile.audio_languages and "vi" in profile.audio_languages
+                ):
+                    tag = "vie"
+            elif profile.audio_languages and "vi" in profile.audio_languages:
+                tag = "vie"
         if tag == "dub":
             return "ViE DUB"
         if tag == "vie":
@@ -141,7 +161,7 @@ class VietMediaFSlotRules(SlotRules):
         if audio_slot in ("ViE", "ViE DUB"):
             # Safety check: Cannot safely compare Vietnamese audio tracks if existing release MediaInfo is unavailable
             if existing.audio_languages is not None or VietMediaF._entry_has_mediainfo(existing_entry):
-                if upload_vi_count > existing_vi_count:
+                if upload_vi_count > existing_vi_count and existing_vi_count >= 1:
                     return (
                         Verdict.ALLOW,
                         f"Your release has more Vietnamese audio tracks ({upload_vi_count}) than the existing release ({existing_vi_count}).",
@@ -184,6 +204,7 @@ class VietMediaFSlotRules(SlotRules):
         return Verdict.BLOCK, ""
 
     def decide(self, upload: ReleaseProfile, existing: Sequence[ReleaseProfile]) -> SlotDecision | None:
+        self._upload_profile = upload
         upload_key = self.key(upload)
         label = slot_label(upload_key)
         return self.by_slot(

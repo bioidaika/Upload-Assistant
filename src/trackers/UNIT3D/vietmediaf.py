@@ -790,8 +790,8 @@ class VietMediaF(UNIT3D):
                 else:
                     entry_vi_audio_count = self._count_vietnamese_audio_tracks_entry(entry)
                     if (
-                        (has_dual_vi_upload and not self._has_dual_vietnamese_audio_entry(entry))
-                        or (upload_vi_audio_count > entry_vi_audio_count)
+                        (has_dual_vi_upload and not self._has_dual_vietnamese_audio_entry(entry) and entry_vi_audio_count >= 1)
+                        or (upload_vi_audio_count > entry_vi_audio_count and entry_vi_audio_count >= 1)
                     ):
                         entry["trumpable"] = True
                         if has_dual_vi_upload and not self._has_dual_vietnamese_audio_entry(entry):
