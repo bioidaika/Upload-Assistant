@@ -667,6 +667,7 @@ class DupeChecker:
                     return False
 
             if tracker_name == "VIETMEDIAF":
+                from src.slot_rules.profile import codec_from_text
                 from src.trackers.UNIT3D.vietmediaf import VietMediaF
 
                 upload_audio_tag = VietMediaF._existing_audio_tag(meta.name or "") or VietMediaF._existing_audio_tag(meta.clean_name or "")
@@ -678,6 +679,16 @@ class DupeChecker:
                 if upload_audio_tag != entry_audio_tag:
                     await log_exclusion(
                         f"VietMediaF audio tag mismatch (upload={upload_audio_tag or 'Original'} vs existing={entry_audio_tag or 'Original'})",
+                        each,
+                    )
+                    return True
+
+                upload_codec = codec_from_text(f"{meta.video_encode or ''} {meta.video_codec or ''}") or codec_from_text(meta.name or "")
+                entry_codec = codec_from_text(each)
+                # Releases with different video codecs (H.264, H.265, AV1) belong to separate slots on VietMediaF
+                if upload_codec and entry_codec and upload_codec != entry_codec:
+                    await log_exclusion(
+                        f"VietMediaF video codec mismatch (upload={upload_codec} vs existing={entry_codec})",
                         each,
                     )
                     return True

@@ -213,5 +213,7 @@ class VietMediaFSlotRules(SlotRules):
             self.key,
             label,
             trump=self.vietmediaf_trump,
-            notes=["VietMediaF allows Original audio, ViE (Voice-over), and ViE DUB, as well as SDR, DV, and HDR dynamic ranges, to coexist in separate slots."],
+            notes=[
+                "VietMediaF allows Original audio, ViE (Voice-over), and ViE DUB, dynamic ranges (SDR, DV, HDR), and video codecs (H.264, H.265, AV1) to coexist in separate slots."
+            ],
         )

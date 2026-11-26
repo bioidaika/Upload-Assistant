@@ -8,7 +8,26 @@ import httpx
 
 from src.console import logger
 from src.meta import Meta
-from src.slot_rules.profile import DV, HDR10, HDR10P, HLG, PQ10, hdr_from_meta_value, hdr_from_name
+from src.slot_rules.profile import (
+    DV,
+    HDR10,
+    HDR10P,
+    HLG,
+    PQ10,
+    SD,
+    WEBDL,
+    WEBRIP,
+    _traits_from_mediainfo_text,
+    codec_from_text,
+    editions_from_text,
+    hdr_from_meta_value,
+    hdr_from_name,
+    kind_from_meta,
+    kind_from_name,
+    kind_from_type_label,
+    normalize_resolution,
+    resolution_from_name,
+)
 from src.trackers.UNIT3D import UNIT3D
 from src.trump_reports import TrumpPlan, TrumpSupport
 
@@ -711,6 +730,10 @@ class VietMediaF(UNIT3D):
         has_dual_vi_upload = self._has_dual_vietnamese_audio_meta(meta)
         upload_vi_audio_count = self._count_vietnamese_audio_tracks_meta(meta)
         upload_name = meta.name or ""
+        upload_res = SD if getattr(meta, "sd", False) else (normalize_resolution(getattr(meta, "resolution", None)) or resolution_from_name(upload_name))
+        upload_kind = kind_from_meta(meta) or kind_from_name(upload_name)
+        upload_codec = codec_from_text(f"{getattr(meta, 'video_encode', '')} {getattr(meta, 'video_codec', '')}") or codec_from_text(upload_name)
+        upload_edition = editions_from_text(getattr(meta, "edition", None)) | editions_from_text(upload_name)
         upload_has_bloat = self._has_audio_bloat_meta(meta)
         upload_video_kbps = self._video_bitrate_kbps_meta(meta)
         upload_srv = self._extract_streaming_service(upload_name, getattr(meta, "service", None))
@@ -726,12 +749,11 @@ class VietMediaF(UNIT3D):
             entry_slot = self._entry_audio_slot(entry)
             entry_hdr_flags = self._hdr_flags_from_entry(entry)
             entry_hdr_slot = self._dynamic_range_slot(entry_hdr_flags)
-
-            # Different slot (audio or dynamic range): cannot trump cross-slot. Reset trumpable if tracker API marked it
-            if upload_slot != entry_slot or upload_hdr_slot != entry_hdr_slot:
-                if entry.get("trumpable", False):
-                    entry["trumpable"] = False
-                continue
+            entry_res = normalize_resolution(cast(str | None, entry.get("res"))) or resolution_from_name(entry_name)
+            entry_kind = kind_from_type_label(cast(str | None, entry.get("type"))) or kind_from_name(entry_name)
+            entry_mi = _traits_from_mediainfo_text(cast(str | None, entry.get("media_info")))
+            entry_codec = entry_mi.codec or codec_from_text(entry_name)
+            entry_edition = editions_from_text(entry_name)
 
             # Safeguard: Do not cross-trump between TV and Movie releases
             if meta.category == "MOVIE" and self._is_tv_release_name(entry_name):
@@ -739,6 +761,19 @@ class VietMediaF(UNIT3D):
                     entry["trumpable"] = False
                 continue
             if meta.category == "TV" and not self._is_tv_release_name(entry_name):
+                if entry.get("trumpable", False):
+                    entry["trumpable"] = False
+                continue
+
+            # Different slot (audio, dynamic range, resolution, codec, or edition): cannot trump cross-slot.
+            # Reset trumpable if tracker API marked it.
+            if (
+                upload_slot != entry_slot
+                or upload_hdr_slot != entry_hdr_slot
+                or (upload_res and entry_res and upload_res != entry_res)
+                or (upload_codec and entry_codec and upload_codec != entry_codec)
+                or upload_edition != entry_edition
+            ):
                 if entry.get("trumpable", False):
                     entry["trumpable"] = False
                 continue
@@ -754,14 +789,24 @@ class VietMediaF(UNIT3D):
                 )
                 continue
 
-            # 1. Bad Release Group trumping
-            if self._is_bad_release_group(entry_name) and not self._is_bad_release_group(upload_name):
+            # 1. Bad Release Group trumping (within same resolution/codec/HDR/audio slot; WEB-DL may also replace WEBRip bad group)
+            if (
+                (not upload_kind or not entry_kind or upload_kind == entry_kind or (upload_kind == WEBDL and entry_kind == WEBRIP))
+                and self._is_bad_release_group(entry_name)
+                and not self._is_bad_release_group(upload_name)
+            ):
                 entry["trumpable"] = True
                 entry["trump_reason"] = "bad_release_group"
                 logger.info(
                     f"[bold green]{self.tracker}: Torrent {entry.get('id')} ({entry_name}) "
                     f"is from a bad release group while your upload is a proper release. Marked as trumpable![/bold green]"
                 )
+                continue
+
+            # Different release type (e.g. WEB-DL vs Encode vs Remux): cannot trump across slots
+            if upload_kind and entry_kind and upload_kind != entry_kind:
+                if entry.get("trumpable", False):
+                    entry["trumpable"] = False
                 continue
 
             # 2. Subtitle trumping within same slot (Original, ViE, ViE DUB)
@@ -826,7 +871,9 @@ class VietMediaF(UNIT3D):
             # 5. Different Streaming Service Video Bitrate Upgrade Trump (WEB-DL only, clean audio required)
             entry_srv = self._extract_streaming_service(entry_name)
             if (
-                not upload_has_bloat
+                upload_kind == WEBDL
+                and entry_kind == WEBDL
+                and not upload_has_bloat
                 and not self._is_bad_release_group(upload_name)
                 and upload_srv
                 and entry_srv

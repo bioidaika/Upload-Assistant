@@ -590,6 +590,8 @@ class UploadHelper:
                 meta.trump_reason = "fewer_vietnamese_audio_tracks"
             elif "hdr" in why_lower or "priority over" in why_lower:
                 meta.trump_reason = "hdr_upgrade"
+            elif "video bitrate" in why_lower:
+                meta.trump_reason = "higher_video_bitrate"
             elif meta.filename_match and meta.file_count_match:
                 meta.trump_reason = "exact_match"
             else:
@@ -606,6 +608,7 @@ class UploadHelper:
                     "missing_dual_vietnamese_audio": trump_reports.SLOT_RULES,
                     "fewer_vietnamese_audio_tracks": trump_reports.SLOT_RULES,
                     "hdr_upgrade": trump_reports.SLOT_RULES,
+                    "higher_video_bitrate": trump_reports.SLOT_RULES,
                 }
                 plan_reason = reason_map.get(meta.trump_reason, trump_reports.TRUMPABLE)
                 plan = TrumpPlan(
@@ -768,19 +771,67 @@ class UploadHelper:
 
         elif meta.dupe is not False:
             upload = True
-        elif meta.unattended_auto and slot_verdict is not Verdict.BLOCK and (
-            (
-                (any(isinstance(entry, dict) and entry.get("trumpable") for entry in dupes_list) or meta.trumpable_id)
-                and (meta.trumpable_id or (meta.season_pack_contains_episode and meta.get(f"{tracker_name}_matched_episode_ids", [])))
+        else:
+            # When slot rules confirm the upload's own slot has no occupants (and no season-pack/exact-file match),
+            # never let -uaa auto-trump an unrelated torrent from another slot.
+            has_season_pack_episodes = bool(
+                (meta.get("season_pack_contains_episode") or meta.get(f"{tracker_name}_matched_reason") == "season_pack_contains_episode")
+                and meta.get(f"{tracker_name}_matched_episode_ids", [])
             )
-            or (
-                meta.filename_match
-                and meta.file_count_match
-                and tracker_name in ["AITHER", "LST", "VIETMEDIAF"]
+            slot_is_free = (
+                slot_decision is not None
+                and slot_verdict is Verdict.ALLOW
+                and not slot_decision.conflicts
+                and not slot_decision.trump
+                and slot_decision.reason
+                in (
+                    "No release on the site is using this slot yet.",
+                    "There is still room in this slot, and your release is different enough from the one there.",
+                )
+                and not has_season_pack_episodes
+                and not (meta.filename_match and meta.file_count_match)
+            )
+            if (
+                meta.unattended_auto
+                and slot_verdict is not Verdict.BLOCK
+                and not slot_is_free
                 and (
-                    meta.trumpable_id
-                    or any(isinstance(entry, dict) and entry.get("trumpable") for entry in dupes_list)
+                    (
+                        (any(isinstance(entry, dict) and entry.get("trumpable") for entry in dupes_list) or meta.trumpable_id)
+                        and (meta.trumpable_id or has_season_pack_episodes)
+                    )
                     or (
+                        meta.filename_match
+                        and meta.file_count_match
+                        and tracker_name in ["AITHER", "LST", "VIETMEDIAF"]
+                        and (
+                            meta.trumpable_id
+                            or any(isinstance(entry, dict) and entry.get("trumpable") for entry in dupes_list)
+                            or (
+                                slot_decision
+                                and slot_decision.conflicts
+                                and (
+                                    "replace" in (slot_decision.reason or "").lower()
+                                    or "vietnamese" in (slot_decision.why or "").lower()
+                                    or "adds" in (slot_decision.why or "").lower()
+                                )
+                            )
+                        )
+                    )
+                )
+            ):
+                upload = True
+                trumpable_dupes = [entry for entry in dupes_list if isinstance(entry, dict) and entry.get("trumpable")]
+                _apply_slot_trump(slot_decision, trumpable_dupes)
+                logger.info(f"[bold green]{tracker_name}: Unattended auto mode (-uaa) enabled, automatically trumping release (reason: {meta.trump_reason}).[/bold green]")
+            elif slot_verdict is Verdict.ALLOW:
+                # Unattended: a tracker with slot rules decides; REVIEW keeps the basic result.
+                logger.info(f"[green]{tracker_name}: uploading, slot rules allow this release.[/green]")
+                if tracker_name in ["AITHER", "LST", "VIETMEDIAF"] and not slot_is_free:
+                    trumpable_dupes = [entry for entry in dupes_list if isinstance(entry, dict) and entry.get("trumpable")]
+                    # Fallback: slot_decision detected a trump opportunity (e.g. REPACK, Vietnamese subtitles/audio)
+                    # even when search_existing didn't mark entries as trumpable (compatibility layer).
+                    has_slot_trump = bool(
                         slot_decision
                         and slot_decision.conflicts
                         and (
@@ -789,40 +840,17 @@ class UploadHelper:
                             or "adds" in (slot_decision.why or "").lower()
                         )
                     )
-                )
-            )
-        ):
-            upload = True
-            trumpable_dupes = [entry for entry in dupes_list if isinstance(entry, dict) and entry.get("trumpable")]
-            _apply_slot_trump(slot_decision, trumpable_dupes)
-            logger.info(f"[bold green]{tracker_name}: Unattended auto mode (-uaa) enabled, automatically trumping release (reason: {meta.trump_reason}).[/bold green]")
-        elif slot_verdict is Verdict.ALLOW:
-            # Unattended: a tracker with slot rules decides; REVIEW keeps the basic result.
-            logger.info(f"[green]{tracker_name}: uploading, slot rules allow this release.[/green]")
-            if tracker_name in ["AITHER", "LST", "VIETMEDIAF"]:
-                trumpable_dupes = [entry for entry in dupes_list if isinstance(entry, dict) and entry.get("trumpable")]
-                # Fallback: slot_decision detected a trump opportunity (e.g. REPACK, Vietnamese subtitles/audio)
-                # even when search_existing didn't mark entries as trumpable (compatibility layer).
-                has_slot_trump = bool(
-                    slot_decision
-                    and slot_decision.conflicts
-                    and (
-                        "replace" in (slot_decision.reason or "").lower()
-                        or "vietnamese" in (slot_decision.why or "").lower()
-                        or "adds" in (slot_decision.why or "").lower()
-                    )
-                )
-                if (meta.unattended_auto and (trumpable_dupes or meta.trumpable_id)) or has_slot_trump:
-                    _apply_slot_trump(slot_decision, trumpable_dupes)
-                    logger.info(
-                        f"[bold green]{tracker_name}: Slot rules allow replacing existing release; "
-                        f"automatically trumping release (reason: {meta.trump_reason}).[/bold green]"
-                    )
-            upload = True
-        else:
-            if slot_verdict is Verdict.BLOCK:
-                logger.info(f"[bold red]{tracker_name}: skipping upload, slot rules recommend against it.[/bold red]", extra={"ua_gui": False})
-            upload = False
+                    if (meta.unattended_auto and (trumpable_dupes or meta.trumpable_id)) or has_slot_trump:
+                        _apply_slot_trump(slot_decision, trumpable_dupes)
+                        logger.info(
+                            f"[bold green]{tracker_name}: Slot rules allow replacing existing release; "
+                            f"automatically trumping release (reason: {meta.trump_reason}).[/bold green]"
+                        )
+                upload = True
+            else:
+                if slot_verdict is Verdict.BLOCK:
+                    logger.info(f"[bold red]{tracker_name}: skipping upload, slot rules recommend against it.[/bold red]", extra={"ua_gui": False})
+                upload = False
 
         display_name = display_name if display_name is not None else meta.name
         display_name = display_name

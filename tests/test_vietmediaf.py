@@ -1729,5 +1729,118 @@ def test_vietmediaf_trump_report_request_includes_staff_deletion_notice():
     assert "Please consider downloading the new torrent and seeding!" in msg
 
 
+@pytest.mark.asyncio
+async def test_vietmediaf_h264_upload_does_not_trump_existing_av1_slot():
+    from src.dupe_checking import DupeChecker
+    from src.slot_rules.models import Verdict
+    from src.slot_rules.registry import evaluate_slots
+    from src.uphelper import UploadHelper
+
+    vmf = tracker()
+    existing_av1 = {
+        "id": 13612,
+        "name": "Jurassic Park III 2001 1080p AMZN WEB-DL DD+ 5.1 AV1-NORViNE",
+        "size": "3.8 GB",
+        "res": "1080p",
+        "type": "WEBDL",
+        "trumpable": False,
+        "media_info": (
+            "Video\n"
+            "Format : AV1\n"
+            "Bit rate : 4 727 kb/s\n\n"
+            "Audio\n"
+            "Format : E-AC-3\n"
+            "Language : English\n"
+        ),
+    }
+
+    upload_h264_meta = Meta(
+        name="Jurassic Park III 2001 REPACK 1080p MA WEB-DL DD+ 5.1 Atmos H.264-FIEND",
+        clean_name="Jurassic Park III 2001 REPACK 1080p MA WEB-DL DD+ 5.1 Atmos H.264-FIEND",
+        title="Jurassic Park III",
+        year="2001",
+        resolution="1080p",
+        category="MOVIE",
+        type="WEBDL",
+        source="Web",
+        service="MA",
+        video_codec="H.264",
+        video_encode="AVC",
+        repack="REPACK",
+        tag="-FIEND",
+        original_language="en",
+        audio_languages=["English"],
+        unattended=True,
+        unattended_auto=True,
+        dupe=False,
+        mediainfo={
+            "media": {
+                "track": [
+                    {"@type": "General", "OverallBitRate": "8768000"},
+                    {"@type": "Video", "Format": "AVC", "BitRate": "8000000"},
+                    {"@type": "Audio", "Format": "E-AC-3", "Language": "en", "Title": "English"},
+                ]
+            }
+        },
+        VIETMEDIAF_title_releases=[dict(existing_av1)],
+    )
+
+    dupes = [dict(existing_av1)]
+    vmf._apply_vietnamese_trump_rules(upload_h264_meta, dupes)
+    assert dupes[0]["trumpable"] is False
+
+    slot_decision = await evaluate_slots(dupes, upload_h264_meta, "VIETMEDIAF", example_config)
+    assert slot_decision is not None
+    assert slot_decision.verdict == Verdict.ALLOW
+    assert slot_decision.reason == "No release on the site is using this slot yet."
+    assert slot_decision.conflicts == []
+    assert slot_decision.trump is False
+    assert "H.264" in slot_decision.slot
+
+    checker = DupeChecker(example_config)
+    filtered = await checker.filter_dupes(dupes, upload_h264_meta, "VIETMEDIAF")
+    assert filtered == []
+    assert upload_h264_meta.trumpable_id is None
+
+    helper = UploadHelper(example_config)
+    is_dupe, updated_meta = await helper.dupe_check(filtered, upload_h264_meta, "VIETMEDIAF", slot_decision)
+    assert is_dupe is False
+    assert updated_meta.were_trumping is False
+    assert not updated_meta.trump_plans
+
+    # Even if an unrelated AV1 release was marked trumpable on site API, -uaa must not auto-trump when the H.264 slot is free
+    api_trumpable_av1 = [dict(existing_av1, trumpable=True)]
+    meta_api_trumpable = Meta(**upload_h264_meta.to_dict())
+    meta_api_trumpable.trumpable_id = 13612
+    is_dupe_api, updated_meta_api = await helper.dupe_check(api_trumpable_av1, meta_api_trumpable, "VIETMEDIAF", slot_decision)
+    assert is_dupe_api is False
+    assert updated_meta_api.were_trumping is False
+    assert not updated_meta_api.trump_plans
+
+
+def test_vietmediaf_higher_video_bitrate_trump_message_uses_clean_notice():
+    from src.trackersetup import TrackerSetup
+    from src.trump_reports import SLOT_RULES, TrumpPlan
+
+    vmf = tracker()
+    meta = Meta(
+        name="Jurassic Park III 2001 REPACK 1080p MA WEB-DL DD+ 5.1 Atmos H.264-FIEND",
+        ua_name="Upload Assistant",
+        trump_reason="higher_video_bitrate",
+    )
+    plan = TrumpPlan(
+        tracker="VIETMEDIAF",
+        reported_id="13612",
+        reported_name="Jurassic Park III 2001 1080p AMZN WEB-DL DD+ 5.1 H.264-OLD",
+        reason=SLOT_RULES,
+        detail="Your MA WEB-DL has a significantly higher video bitrate (8000 kbps vs 4727 kbps) than the existing AMZN WEB-DL.",
+    )
+    msg = TrackerSetup(example_config)._build_trump_report_message(meta, "VIETMEDIAF", "13612", "15000", vmf, plan=plan)
+    assert "Superior streaming service release with higher video bitrate" in msg
+    assert "superior streaming source with higher video bitrate" in msg
+    assert "https://tracker.vietmediaf.store/torrents/15000" in msg
+
+
+
 
 
