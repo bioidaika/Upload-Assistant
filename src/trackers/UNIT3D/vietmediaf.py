@@ -1,5 +1,6 @@
 # Upload Assistant © 2026 Audionut & wastaken7 — Licensed under UAPL v1.0
 import asyncio
+import copy
 import re
 import unicodedata
 from typing import Any, cast
@@ -1032,11 +1033,17 @@ class VietMediaF(UNIT3D):
     ) -> tuple[str, dict[str, Any]]:
         from src.trackersetup import TrackerSetup
 
-        effective_meta = meta if meta is not None else Meta()
+        effective_meta = copy.copy(meta) if meta is not None else Meta()
         if plan.reported_name and not effective_meta.get(f"{self.tracker}_reported_torrent_name"):
             effective_meta[f"{self.tracker}_reported_torrent_name"] = plan.reported_name
-        if plan.reason and not effective_meta.trump_reason:
-            effective_meta.trump_reason = plan.reason
+        resolved_reason = (
+            getattr(plan, "trump_reason", "")
+            or effective_meta.get(f"{self.tracker}_trump_reason")
+            or effective_meta.trump_reason
+            or plan.reason
+        )
+        if resolved_reason:
+            effective_meta.trump_reason = resolved_reason
         if plan.comparison == "description":
             effective_meta.screenshots_in_description = True
 

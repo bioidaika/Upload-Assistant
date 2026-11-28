@@ -1841,6 +1841,129 @@ def test_vietmediaf_higher_video_bitrate_trump_message_uses_clean_notice():
     assert "https://tracker.vietmediaf.store/torrents/15000" in msg
 
 
+@pytest.mark.asyncio
+async def test_vietmediaf_season_pack_hdr_upgrade_reports_hdr_reason_not_season_pack(monkeypatch: pytest.MonkeyPatch):
+    from src import trackerstatus, trump_reports
+    from src.trump_reports import SEASON_PACK, SLOT_RULES, TrumpPlan
+
+    existing_pack = {
+        "id": 15538,
+        "name": "House of the Dragon S03 2160p UHD BluRay REMUX DV HDR HEVC TrueHD 7.1 Atmos-TRiToN",
+        "size": "273.9 GB",
+        "res": "2160p",
+        "type": "REMUX",
+        "trumpable": False,
+        "media_info": (
+            "Video\n"
+            "Format : HEVC\n"
+            "HDR format : Dolby Vision, Version 1.0, Profile 7.6, dvhe.07.06, BL+EL+RPU, no metadata compression, Blu-ray compatible / SMPTE ST 2086, HDR10 compatible\n\n"
+            "Audio\n"
+            "Format : MLP FBA 16-ch\n"
+            "Language : English\n"
+        ),
+    }
+
+    async def fake_super_search_existing(self, meta):
+        meta["VIETMEDIAF_title_releases"] = [dict(existing_pack)]
+        return [dict(existing_pack)]
+
+    async def fake_false(*_args: Any, **_kwargs: Any) -> bool:
+        return False
+
+    class StubRouter:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            pass
+
+        async def apply(self, meta: Meta) -> Meta:
+            return meta
+
+    monkeypatch.setattr("src.trackers.UNIT3D.UNIT3D.search_existing", fake_super_search_existing)
+    monkeypatch.setattr(trackerstatus.TrackerSetup, "check_banned_group", fake_false)
+    monkeypatch.setattr(trackerstatus.TrackerSetup, "get_torrent_claims", fake_false)
+    monkeypatch.setattr(trackerstatus, "AvistaZNetworkRouter", StubRouter)
+
+    meta = Meta(
+        name="House of the Dragon S03 Hybrid 2160p UHD BluRay REMUX DV HDR10+ HEVC TrueHD 7.1 Atmos-FraMeSToR",
+        clean_name="House of the Dragon S03 Hybrid 2160p UHD BluRay REMUX DV HDR10+ HEVC TrueHD 7.1 Atmos-FraMeSToR",
+        ua_name="Upload Assistant",
+        title="House of the Dragon",
+        year="2022",
+        season="S03",
+        episode="",
+        tv_pack=1,
+        resolution="2160p",
+        category="TV",
+        type="REMUX",
+        source="BluRay",
+        video_codec="HEVC",
+        hdr="DV HDR10+",
+        tag="-FraMeSToR",
+        original_language="en",
+        audio_languages=["English"],
+        imdb_id=11198330,
+        tmdb=94997,
+        trackers=["VIETMEDIAF"],
+        tracker_status={},
+        unattended=True,
+        unattended_auto=True,
+        dupe=False,
+        is_disc=None,
+    )
+
+    cfg = {"DEFAULT": dict(example_config["DEFAULT"]), "TRACKERS": {"VIETMEDIAF": {**example_config["TRACKERS"]["VIETMEDIAF"], "api_key": "test-key"}}}
+    successful = await trackerstatus.TrackerStatusManager(cfg).process_all_trackers(meta)
+    assert successful == 1
+    assert meta.were_trumping is True
+    assert meta.trump_reason == "hdr_upgrade"
+    assert meta.get("VIETMEDIAF_trumpable_id") == 15538
+    assert meta.trump_plans["VIETMEDIAF"]["trump_reason"] == "hdr_upgrade"
+
+    plan = trump_reports.get_plan(meta, "VIETMEDIAF")
+    assert plan is not None
+    vmf = tracker()
+    _url, payload = vmf.trump_report_request(plan, "15555", trump_reports.report_message(meta, plan), meta=meta)
+    msg = payload["message"]
+    assert "Trump Report: Broader HDR package replacing existing release" in msg
+    assert "broader HDR package replacement" in msg
+    assert "Season pack trump" not in msg
+    assert "full season pack replacement" not in msg
+    assert "User says comparison screenshots are in description" not in msg
+    assert "https://tracker.vietmediaf.store/torrents/15555" in msg
+
+    # Interactive mode also builds TrumpPlan with reason=SLOT_RULES and no meta.trump_reason;
+    # message builder must still infer hdr_upgrade from plan.detail instead of Season pack trump.
+    interactive_meta = Meta(
+        name=meta.name,
+        ua_name="Upload Assistant",
+        tv_pack=1,
+        trump_reason=None,
+    )
+    interactive_plan = TrumpPlan(
+        tracker="VIETMEDIAF",
+        reported_id="15538",
+        reported_name=existing_pack["name"],
+        reason=SLOT_RULES,
+        detail="DV HDR10+ takes priority over DV HDR10 in this slot.",
+    )
+    _url2, interactive_payload = vmf.trump_report_request(interactive_plan, "15555", "slot trump", meta=interactive_meta)
+    interactive_msg = interactive_payload["message"]
+    assert "Trump Report: Broader HDR package replacing existing release" in interactive_msg
+    assert "broader HDR package replacement" in interactive_msg
+    assert "Season pack trump" not in interactive_msg
+    assert interactive_meta.trump_reason is None  # Caller's meta must not be mutated
+
+    # Genuine season pack replacing individual episode still reports Season pack trump.
+    ep_plan = TrumpPlan(
+        tracker="VIETMEDIAF",
+        reported_id="14000",
+        reported_name="House of the Dragon S03E01 2160p UHD BluRay REMUX DV HDR HEVC-TRiToN",
+        reason=SEASON_PACK,
+    )
+    _url3, ep_payload = vmf.trump_report_request(ep_plan, "15555", "season pack trump", meta=interactive_meta)
+    assert "Trump Report: Season pack trump" in ep_payload["message"]
+    assert "full season pack replacement" in ep_payload["message"]
+
+
 
 
 

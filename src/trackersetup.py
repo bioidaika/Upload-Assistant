@@ -241,6 +241,8 @@ class TrackerSetup:
             else ""
         )
 
+        from src.trump_reports import infer_slot_trump_reason
+
         specific_reasons = {
             "missing_vietnamese_subtitles",
             "missing_dual_vietnamese_audio",
@@ -251,16 +253,35 @@ class TrackerSetup:
             "higher_video_bitrate",
             "exact_match",
         }
-        if meta.trump_reason in specific_reasons:
+        plan_trump_reason = getattr(plan, "trump_reason", None)
+        tracker_trump_reason = meta.get(f"{tracker}_trump_reason")
+        inferred_detail_reason = infer_slot_trump_reason(getattr(plan, "detail", None))
+
+        if plan_trump_reason in specific_reasons:
+            reason_key = plan_trump_reason
+        elif tracker_trump_reason in specific_reasons:
+            reason_key = tracker_trump_reason
+        elif meta.trump_reason in specific_reasons:
             reason_key = meta.trump_reason
         elif getattr(plan, "detail", None) in specific_reasons:
             reason_key = plan.detail
+        elif inferred_detail_reason in specific_reasons:
+            reason_key = inferred_detail_reason
         elif getattr(plan, "reason", None) in specific_reasons:
             reason_key = plan.reason
-        elif meta.tv_pack or getattr(plan, "reason", None) == "season_pack":
+        elif getattr(plan, "reason", None) == "season_pack":
+            reason_key = "season_pack"
+        elif plan is None and meta.tv_pack:
             reason_key = "season_pack"
         else:
-            reason_key = meta.trump_reason or getattr(plan, "detail", None) or getattr(plan, "reason", None) or "trumpable_release"
+            reason_key = (
+                plan_trump_reason
+                or tracker_trump_reason
+                or meta.trump_reason
+                or getattr(plan, "detail", None)
+                or getattr(plan, "reason", None)
+                or "trumpable_release"
+            )
 
         reasons = {
             "missing_vietnamese_subtitles": (

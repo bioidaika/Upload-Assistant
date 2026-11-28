@@ -81,6 +81,28 @@ class TrumpCandidate:
         return str(self.entry.get("name") or "")
 
 
+def infer_slot_trump_reason(text: str | None) -> str | None:
+    """Infer a normalized trump reason key from slot-rule prose or explicit code."""
+    lowered = (text or "").strip().lower()
+    if not lowered:
+        return None
+    if "repack" in lowered or "proper" in lowered:
+        return "repack"
+    if "bad release group" in lowered:
+        return "bad_release_group"
+    if "subtitle" in lowered:
+        return "missing_vietnamese_subtitles"
+    if "dual" in lowered and "audio" in lowered:
+        return "missing_dual_vietnamese_audio"
+    if "audio" in lowered:
+        return "fewer_vietnamese_audio_tracks"
+    if "hdr" in lowered or "priority over" in lowered:
+        return "hdr_upgrade"
+    if "video bitrate" in lowered:
+        return "higher_video_bitrate"
+    return None
+
+
 @dataclass
 class TrumpPlan:
     """A trump report to send once the upload to ``tracker`` finished."""
@@ -97,6 +119,7 @@ class TrumpPlan:
     reported_screenshots: list[str] = field(default_factory=lambda: list[str]())
     trumping_screenshots: list[str] = field(default_factory=lambda: list[str]())
     note: str = ""
+    trump_reason: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -361,6 +384,7 @@ async def review(
         reported_link=str(candidate.entry.get("link") or ""),
         detail=candidate.detail,
         rules_url=candidate.rules_url,
+        trump_reason=str(candidate.entry.get("trump_reason") or infer_slot_trump_reason(candidate.detail) or ""),
     )
     try:
         if tracker_support.comparison and not meta.tv_pack:

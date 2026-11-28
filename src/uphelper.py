@@ -573,25 +573,13 @@ class UploadHelper:
             if not meta.trumpable_name and meta.get(f"{tracker_name}_trumpable_name"):
                 meta.trumpable_name = meta[f"{tracker_name}_trumpable_name"]
 
-            why_lower = (decision.why if decision and decision.why else "").lower()
+            why_text = decision.why if decision and decision.why else ""
             if trumpable_entries and trumpable_entries[0].get("trump_reason"):
                 meta.trump_reason = trumpable_entries[0].get("trump_reason")
             elif meta.get(f"{tracker_name}_trump_reason"):
                 meta.trump_reason = meta.get(f"{tracker_name}_trump_reason")
-            elif "repack" in why_lower or "proper" in why_lower:
-                meta.trump_reason = "repack"
-            elif "bad release group" in why_lower:
-                meta.trump_reason = "bad_release_group"
-            elif "subtitle" in why_lower:
-                meta.trump_reason = "missing_vietnamese_subtitles"
-            elif "dual" in why_lower and "audio" in why_lower:
-                meta.trump_reason = "missing_dual_vietnamese_audio"
-            elif "audio" in why_lower:
-                meta.trump_reason = "fewer_vietnamese_audio_tracks"
-            elif "hdr" in why_lower or "priority over" in why_lower:
-                meta.trump_reason = "hdr_upgrade"
-            elif "video bitrate" in why_lower:
-                meta.trump_reason = "higher_video_bitrate"
+            elif inferred := trump_reports.infer_slot_trump_reason(why_text):
+                meta.trump_reason = inferred
             elif meta.filename_match and meta.file_count_match:
                 meta.trump_reason = "exact_match"
             else:
@@ -599,7 +587,7 @@ class UploadHelper:
 
             tracker_support = trump_reports.support(get_tracker())
             if tracker_support is not None and target_id and (not meta.unattended or meta.unattended_auto):
-                comparison = "description" if meta.screenshots_in_description or not tracker_support.comparison else ""
+                comparison = "description" if meta.screenshots_in_description else ""
                 reason_map = {
                     "exact_match": trump_reports.EXACT_MATCH,
                     "repack": trump_reports.SLOT_RULES,
@@ -617,9 +605,10 @@ class UploadHelper:
                     reported_name=str(target_name or ""),
                     reason=plan_reason,
                     reported_link=str((trumpable_entries[0].get("link") if trumpable_entries else None) or conflict.get("link") or ""),
-                    detail=decision.why if decision and decision.why else meta.trump_reason,
+                    detail=why_text or meta.trump_reason,
                     rules_url=decision.rules_url if decision else "",
                     comparison=comparison,
+                    trump_reason=str(meta.trump_reason or ""),
                 )
                 meta.trump_plans[tracker_name] = plan.to_dict()
 

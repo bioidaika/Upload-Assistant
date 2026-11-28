@@ -328,11 +328,34 @@ class TrackerStatusManager:
                         cross_seed_key = f"{tracker_name}_cross_seed"
                         cross_seed_value = local_meta.get(cross_seed_key) if cross_seed_key in local_meta else None
                         trump_plan = local_meta.trump_plans.get(tracker_name)
+                        matched_episode_ids = local_meta.get(f"{tracker_name}_matched_episode_ids")
+                        matched_id = local_meta.get(f"{tracker_name}_matched_id")
+                        trumpable_id = local_meta.get(f"{tracker_name}_trumpable_id") or local_meta.get("trumpable_id")
+                        trumpable_name = local_meta.get(f"{tracker_name}_trumpable_name") or local_meta.get("trumpable_name")
+                        tracker_trump_reason = local_meta.get(f"{tracker_name}_trump_reason")
 
                         # Only shared-state writes go under the lock
                         async with meta_lock:
                             if cross_seed_key in local_meta and cross_seed_value:
                                 meta[cross_seed_key] = cross_seed_value
+                            if matched_episode_ids:
+                                meta[f"{tracker_name}_matched_episode_ids"] = matched_episode_ids
+                            if matched_id:
+                                meta[f"{tracker_name}_matched_id"] = matched_id
+                            if not is_dupe and local_meta.get("were_trumping"):
+                                meta.were_trumping = True
+                                if trumpable_id:
+                                    meta[f"{tracker_name}_trumpable_id"] = trumpable_id
+                                    if not meta.trumpable_id:
+                                        meta.trumpable_id = trumpable_id
+                                if trumpable_name:
+                                    meta[f"{tracker_name}_trumpable_name"] = trumpable_name
+                                    if not meta.trumpable_name:
+                                        meta.trumpable_name = trumpable_name
+                                if tracker_trump_reason:
+                                    meta[f"{tracker_name}_trump_reason"] = tracker_trump_reason
+                                if local_meta.get("trump_reason"):
+                                    meta.trump_reason = local_meta.trump_reason
                             if trump_plan and not is_dupe:
                                 meta.trump_plans[tracker_name] = trump_plan
 
